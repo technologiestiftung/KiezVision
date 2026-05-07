@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
@@ -32,8 +33,25 @@ const EXAMPLE_LIBRARY = [
   { id: 'ex1', dataUrl: 'https://images.unsplash.com/photo-1560930950-5cc20e80e392?auto=format&fit=crop&w=1200&q=80', prompt: '[Mapillary] Berlin Mitte: Alexanderplatz approach', timestamp: Date.now() },
 ];
 
+const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
+
 export default function App() {
-  const [view, setView] = useState<'home' | 'editor' | 'library' | 'image-gallery'>('home');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const normalizePath = (pathname: string) => {
+    // Backwards-compat with the requested (typo) route.
+    if (pathname === '/libray') return '/library';
+    return pathname;
+  };
+
+  const normalizedPath = normalizePath(location.pathname);
+  const view: 'home' | 'editor' | 'library' | 'image-gallery' =
+    normalizedPath === '/edit' ? 'editor' :
+    normalizedPath === '/library' ? 'library' :
+    normalizedPath === '/image-gallery' ? 'image-gallery' :
+    'home';
+
   const [language, setLanguage] = useState<'en' | 'de'>('en');
 
   const t = {
@@ -153,35 +171,6 @@ export default function App() {
   const cameraFileFallbackRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
 
-  const setRoute = useCallback((nextView: typeof view) => {
-    const nextPath =
-      nextView === 'image-gallery'
-        ? '/image-gallery'
-        : nextView === 'library'
-          ? '/library'
-          : nextView === 'editor'
-            ? '/editor'
-            : '/';
-
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, '', nextPath);
-    }
-    setView(nextView);
-  }, []);
-
-  useEffect(() => {
-    const syncFromPath = () => {
-      const path = window.location.pathname || '/';
-      if (path === '/image-gallery') setView('image-gallery');
-      else if (path === '/library') setView('library');
-      else if (path === '/editor') setView('editor');
-      else setView('home');
-    };
-    syncFromPath();
-    window.addEventListener('popstate', syncFromPath);
-    return () => window.removeEventListener('popstate', syncFromPath);
-  }, []);
-
   const stopCameraStream = useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
@@ -197,9 +186,9 @@ export default function App() {
       setError(null);
       setHistory([{ id: 'original', dataUrl, prompt, timestamp: Date.now() }]);
       setEditMode('comparison');
-      setRoute('editor');
+      navigate('/edit');
     },
-    [setRoute]
+    [navigate]
   );
 
   useEffect(() => {
@@ -276,6 +265,16 @@ export default function App() {
     checkKey();
   }, []);
 
+  useEffect(() => {
+    if (location.pathname !== normalizedPath) {
+      navigate(normalizedPath, { replace: true });
+      return;
+    }
+    if (!['/', '/library', '/edit', '/image-gallery'].includes(normalizedPath)) {
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, navigate, normalizedPath]);
+
   const handleSelectKey = async () => {
     if (window.aistudio) {
       await window.aistudio.openSelectKey();
@@ -340,7 +339,7 @@ export default function App() {
 
       setUploadedGallery(entries);
       setSelectedGalleryId(entries[0]?.id ?? null);
-      setRoute('image-gallery');
+      navigate('/image-gallery');
     } catch (err: any) {
       setError(err?.message || 'Failed to process folder upload.');
     } finally {
@@ -417,7 +416,7 @@ export default function App() {
       setMapillaryMetadata(mMeta);
       setHistory([{ id: Date.now().toString(), dataUrl: imageData, prompt: `${source}: ${displayLocation}`, timestamp: Date.now() }]);
       setEditMode('comparison');
-      setView('editor');
+      navigate('/edit');
     } catch (err: any) {
       const isQuotaError = err.message?.toLowerCase().includes("429") || 
                            err.message?.toLowerCase().includes("quota") || 
@@ -628,8 +627,8 @@ export default function App() {
       <header className="border-b-2 border-eb-900 bg-tsb sticky top-0 z-50">
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => setRoute('home')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
-              <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
+            <button onClick={() => navigate('/')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
               <h1 className="text-2xl font-black tracking-tighter leading-none mb-1 text-eb-50">KiezVision</h1>
@@ -658,7 +657,7 @@ export default function App() {
 
           <div className="flex items-center gap-4 h-10">
             <button 
-              onClick={() => setRoute('library')}
+              onClick={() => navigate('/library')}
               className={`flex items-center gap-2 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === 'library' ? 'bg-eb-900 text-eb-50' : 'bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]'}`}
             >
               <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
@@ -749,7 +748,7 @@ export default function App() {
         {view === 'home' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-6 text-center max-w-5xl mx-auto overflow-y-auto">
             <div className="w-24 h-24 bg-white flex items-center justify-center mb-6 border-4 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] rotate-3 overflow-hidden">
-              <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </div>
             <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter leading-[0.9]">{t.reimagine}<br/>{t.yourStreet}</h2>
             <p className="text-eb-900/60 mb-6 max-w-2xl text-lg font-bold tracking-tight">{t.subtitle}</p>
@@ -842,7 +841,7 @@ export default function App() {
           <div className="max-w-7xl mx-auto p-12">
             <div className="flex items-center justify-between mb-16 border-b-4 border-eb-900 pb-8">
               <div>
-                <button onClick={() => setRoute('home')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
+                <button onClick={() => navigate('/')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
                   <ArrowLeft className="w-4 h-4" /> {t.backToHome}
                 </button>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
@@ -872,7 +871,7 @@ export default function App() {
                             setOriginalImage(item.dataUrl);
                             setCurrentImage(item.dataUrl);
                             setHistory([{ ...item, id: 'original' }]);
-                            setRoute('editor');
+                            navigate('/edit');
                             setEditMode('comparison');
                             setImageSource(t.sourceMapillary);
                             setProcessing({ isProcessing: false });
@@ -911,7 +910,7 @@ export default function App() {
                               setOriginalImage(item.dataUrl);
                               setCurrentImage(item.dataUrl);
                               setHistory([{ ...item, id: 'original' }]);
-                              setRoute('editor');
+                              navigate('/edit');
                               setEditMode('comparison');
                             }}
                             className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all"
