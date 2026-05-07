@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
@@ -33,7 +34,20 @@ const EXAMPLE_LIBRARY = [
 ];
 
 export default function App() {
-  const [view, setView] = useState<'home' | 'editor' | 'library'>('home');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const normalizePath = (pathname: string) => {
+    // Backwards-compat with the requested (typo) route.
+    if (pathname === '/libray') return '/library';
+    return pathname;
+  };
+
+  const normalizedPath = normalizePath(location.pathname);
+  const view: 'home' | 'editor' | 'library' =
+    normalizedPath === '/edit' ? 'editor' :
+    normalizedPath === '/library' ? 'library' :
+    'home';
   const [language, setLanguage] = useState<'en' | 'de'>('en');
 
   const t = {
@@ -152,6 +166,16 @@ export default function App() {
     checkKey();
   }, []);
 
+  useEffect(() => {
+    if (location.pathname !== normalizedPath) {
+      navigate(normalizedPath, { replace: true });
+      return;
+    }
+    if (!['/', '/library', '/edit'].includes(normalizedPath)) {
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, navigate, normalizedPath]);
+
   const handleSelectKey = async () => {
     if (window.aistudio) {
       await window.aistudio.openSelectKey();
@@ -176,7 +200,7 @@ export default function App() {
       setError(null);
       setHistory([{ id: 'original', dataUrl: result, prompt: 'Original Upload', timestamp: Date.now() }]);
       setEditMode('comparison');
-      setView('editor');
+      navigate('/edit');
       setProcessing({ isProcessing: false });
     };
     reader.readAsDataURL(file);
@@ -258,7 +282,7 @@ export default function App() {
       setMapillaryMetadata(mMeta);
       setHistory([{ id: Date.now().toString(), dataUrl: imageData, prompt: `${source}: ${displayLocation}`, timestamp: Date.now() }]);
       setEditMode('comparison');
-      setView('editor');
+      navigate('/edit');
     } catch (err: any) {
       const isQuotaError = err.message?.toLowerCase().includes("429") || 
                            err.message?.toLowerCase().includes("quota") || 
@@ -469,7 +493,7 @@ export default function App() {
       <header className="border-b-2 border-black bg-[#ffb2c1] sticky top-0 z-50">
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => setView('home')} className="bg-white p-0 h-10 w-10 flex items-center justify-center border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+            <button onClick={() => navigate('/')} className="bg-white p-0 h-10 w-10 flex items-center justify-center border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
               <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
@@ -499,7 +523,7 @@ export default function App() {
 
           <div className="flex items-center gap-4 h-10">
             <button 
-              onClick={() => setView('library')}
+              onClick={() => navigate('/library')}
               className={`flex items-center gap-2 px-6 h-full border-2 border-black text-xs font-black transition-all ${view === 'library' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]'}`}
             >
               <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
@@ -653,7 +677,7 @@ export default function App() {
           <div className="max-w-7xl mx-auto p-12">
             <div className="flex items-center justify-between mb-16 border-b-4 border-black pb-8">
               <div>
-                <button onClick={() => setView('home')} className="flex items-center gap-2 text-black font-black mb-4 border-2 border-black px-4 h-10 bg-[#ffb2c1] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-none transition-all">
+                <button onClick={() => navigate('/')} className="flex items-center gap-2 text-black font-black mb-4 border-2 border-black px-4 h-10 bg-[#ffb2c1] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-none transition-all">
                   <ArrowLeft className="w-4 h-4" /> {t.backToHome}
                 </button>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
@@ -683,7 +707,7 @@ export default function App() {
                             setOriginalImage(item.dataUrl);
                             setCurrentImage(item.dataUrl);
                             setHistory([{ ...item, id: 'original' }]);
-                            setView('editor');
+                            navigate('/edit');
                             setEditMode('comparison');
                             setImageSource(t.sourceMapillary);
                             setProcessing({ isProcessing: false });
@@ -722,7 +746,7 @@ export default function App() {
                               setOriginalImage(item.dataUrl);
                               setCurrentImage(item.dataUrl);
                               setHistory([{ ...item, id: 'original' }]);
-                              setView('editor');
+                              navigate('/edit');
                               setEditMode('comparison');
                             }}
                             className="flex-1 bg-black text-white h-14 text-xs font-black hover:bg-[#ffb2c1] hover:text-black transition-all"
