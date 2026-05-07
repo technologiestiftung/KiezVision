@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
@@ -42,6 +42,26 @@ const BERLIN_DISTRICTS = [
 ];
 
 const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
+
+function BackToHomeNavButton({
+  navigate,
+  label,
+  className = '',
+}: {
+  navigate: NavigateFunction;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/')}
+      className={`flex items-center gap-2 text-eb-900 font-black border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all${className ? ` ${className}` : ''}`}
+    >
+      <ArrowLeft className="w-4 h-4" /> {label}
+    </button>
+  );
+}
 
 export default function App() {
   const navigate = useNavigate();
@@ -1113,9 +1133,9 @@ export default function App() {
           <div className="max-w-7xl mx-auto p-12">
             <div className="flex flex-wrap items-end justify-between gap-6 mb-16 border-b-4 border-eb-900 pb-8">
               <div>
-                <button onClick={() => navigate('/')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
-                  <ArrowLeft className="w-4 h-4" /> {t.backToHome}
-                </button>
+                <div className="mb-4">
+                  <BackToHomeNavButton navigate={navigate} label={t.backToHome} />
+                </div>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
               </div>
               {folderStatus === 'unsupported' ? (
@@ -1356,6 +1376,9 @@ export default function App() {
                     ? 'No folder images loaded yet. Go back and select a folder.'
                     : 'Noch keine Ordnerbilder geladen. Gehen Sie zurück und wählen Sie einen Ordner.'}
                 </p>
+                <div className="mt-8">
+                  <BackToHomeNavButton navigate={navigate} label={t.backToHome} />
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-12 gap-8 flex-1 min-h-0 overflow-hidden">
