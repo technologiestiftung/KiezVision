@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
@@ -91,6 +91,10 @@ export default function App() {
       libraryEmptyTitle: "No saved visions yet",
       libraryEmptySubtitle: "Transform a Berlin street in the editor and hit Save to add your first vision here.",
       libraryEmptyCta: "Start a new vision",
+      dateToday: "Today",
+      dateYesterday: "Yesterday",
+      visionsCount: "visions",
+      visionCountSingular: "vision",
       libraryFolderConnected: "Library folder connected",
       libraryFolderDisconnected: "No library folder yet",
       libraryFolderNeedsPermission: "Library folder needs to be reconnected",
@@ -147,6 +151,10 @@ export default function App() {
       libraryEmptyTitle: "Noch keine gespeicherten Visionen",
       libraryEmptySubtitle: "Transformiere eine Berliner Straße im Editor und klicke auf Speichern, um deine erste Vision hier abzulegen.",
       libraryEmptyCta: "Neue Vision starten",
+      dateToday: "Heute",
+      dateYesterday: "Gestern",
+      visionsCount: "Visionen",
+      visionCountSingular: "Vision",
       libraryFolderConnected: "Galerie-Ordner verbunden",
       libraryFolderDisconnected: "Noch kein Galerie-Ordner",
       libraryFolderNeedsPermission: "Galerie-Ordner muss erneut verbunden werden",
@@ -206,6 +214,66 @@ export default function App() {
   const [folderStatus, setFolderStatus] = useState<LibraryFolderStatus>('none');
   const [thumbCache, setThumbCache] = useState<Record<string, string>>({});
   const thumbLoadStatusRef = useRef<Record<string, 'loading' | 'done' | 'failed'>>({});
+
+  // Returns the YYYY-MM-DD bucket an entry belongs to. New entries already
+  // have a `folder` field that matches; legacy entries (saved before the
+  // on-disk library existed) get derived from their timestamp.
+  const entryDateKey = useCallback((entry: LibraryEntry): string => {
+    if (entry.folder) return entry.folder;
+    const d = new Date(entry.timestamp);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
+  // Saved visions grouped by date, most recent first; entries within a group
+  // are also sorted newest-first.
+  const libraryByDate = useMemo<Array<[string, LibraryEntry[]]>>(() => {
+    const groups = new Map<string, LibraryEntry[]>();
+    for (const item of library) {
+      if (item.id.startsWith('ex')) continue;
+      const key = entryDateKey(item);
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(item);
+      else groups.set(key, [item]);
+    }
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => b.timestamp - a.timestamp);
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
+  }, [library, entryDateKey]);
+
+  const formatDateHeader = useCallback(
+    (dateKey: string): string => {
+      const today = new Date();
+      const todayKey = (() => {
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      })();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayKey = (() => {
+        const yyyy = yesterday.getFullYear();
+        const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+        const dd = String(yesterday.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      })();
+      if (dateKey === todayKey) return t.dateToday;
+      if (dateKey === yesterdayKey) return t.dateYesterday;
+      const [yyyy, mm, dd] = dateKey.split('-').map(Number);
+      if (!yyyy || !mm || !dd) return dateKey;
+      const date = new Date(yyyy, mm - 1, dd);
+      return date.toLocaleDateString(language === 'en' ? 'en-US' : 'de-DE', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    },
+    [language, t.dateToday, t.dateYesterday]
+  );
   const [uploadedGallery, setUploadedGallery] = useState<GeneratedImage[]>([]);
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false });
@@ -1207,8 +1275,19 @@ export default function App() {
                   </div>
                   <div className="h-0.5 flex-1 bg-eb-900/10" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
-                  {library.filter(item => !item.id.startsWith('ex')).map((item) => {
+                {libraryByDate.map(([dateKey, entries]) => (
+                  <div key={dateKey} className="mb-16 last:mb-0">
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="border-2 border-eb-900 bg-white px-4 py-2 text-xs font-black tracking-tight">
+                        {formatDateHeader(dateKey)}
+                      </div>
+                      <div className="text-[10px] font-black text-eb-900/40 uppercase tracking-widest">
+                        {entries.length} {entries.length === 1 ? t.visionCountSingular : t.visionsCount}
+                      </div>
+                      <div className="h-0.5 flex-1 bg-eb-900/10" />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
+                      {entries.map((item) => {
                     const thumb = thumbCache[item.id] ?? item.dataUrl ?? null;
                     const openInEditor = async () => {
                       setError(null);
@@ -1299,7 +1378,9 @@ export default function App() {
                       </div>
                     );
                   })}
-                </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
