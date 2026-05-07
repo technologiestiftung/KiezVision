@@ -1,0 +1,5 @@
+{
+  "name": "KiezVision",
+  "description": "Generate and transform urban street scenes with Gemini 2.5 Flash. Add nature, water, or remove cars to envision future cities.",
+  "requestFramePermissions": ["camera"]
+}

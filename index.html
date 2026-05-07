@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KiezVision</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              gray: {
+                750: '#2d3748',
+                850: '#1a202c',
+                950: '#0d1117',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #f7f4ed;
+        color: #000000;
+        margin: 0;
+      }
+      .font-mono {
+        font-family: 'JetBrains Mono', monospace;
+      }
+      /* Custom Brutalist scrollbar */
+      ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f7f4ed; 
+        border-left: 2px solid #000000;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #000000; 
+        border: 2px solid #f7f4ed;
+      }
+      
+      @keyframes pixelate-in {
+        0% {
+          filter: blur(20px);
+          opacity: 0;
+          transform: scale(1.1);
+        }
+        50% {
+          filter: blur(10px);
+          opacity: 1;
+          transform: scale(1.05);
+        }
+        100% {
+          filter: blur(0px);
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .animate-pixel-reveal {
+        animation: pixelate-in 2s ease-out forwards;
+      }
+
+      .pixel-grid-layer {
+        background-image: 
+          linear-gradient(to right, rgba(0,0,0,0.1) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0,0,0,0.1) 1px, transparent 1px);
+        background-size: 8px 8px;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
