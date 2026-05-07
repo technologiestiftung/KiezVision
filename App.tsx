@@ -607,6 +607,7 @@ export default function App() {
       } else {
         setError(err.message || "Failed to transform image");
       }
+      throw err instanceof Error ? err : new Error(String(err));
     } finally {
       setProcessing({ isProcessing: false });
     }

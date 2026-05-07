@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Wand2, Loader2 } from 'lucide-react';
 
 interface TransformationPanelProps {
-  onTransform: (prompt: string) => void;
+  onTransform: (prompt: string) => void | Promise<void>;
   isProcessing: boolean;
   placeholder?: string;
   isMaskMode?: boolean;
@@ -56,11 +56,15 @@ export const TransformationPanel: React.FC<TransformationPanelProps> = ({
     }
   }[language];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (prompt.trim()) {
-      onTransform(prompt);
+    const trimmed = prompt.trim();
+    if (!trimmed || isProcessing) return;
+    try {
+      await onTransform(trimmed);
       setPrompt('');
+    } catch {
+      /* error UI handled in App */
     }
   };
 
