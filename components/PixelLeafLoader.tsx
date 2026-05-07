@@ -40,7 +40,7 @@ export const PixelLeafLoader = () => {
             className={`w-full h-full ${
               pixel === 1 ? 'bg-emerald-400' : 
               pixel === 2 ? 'bg-emerald-700' : 
-              pixel === 3 ? 'bg-black' : 'bg-transparent'
+              pixel === 3 ? 'bg-eb-900' : 'bg-transparent'
             }`}
           />
         );

@@ -73,17 +73,18 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
   }, [image, onOverlayChange]);
 
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
     const updateSize = () => {
-      if (containerRef.current) {
-        setContainerSize({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight
-        });
-      }
+      setContainerSize({
+        width: el.clientWidth,
+        height: el.clientHeight
+      });
     };
     updateSize();
-    window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
@@ -218,38 +219,28 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
     return brushSize * 2;
   };
 
-  const getStageSize = () => {
-    if (!containerSize.width || !containerSize.height || !imageSize.width || !imageSize.height) {
-      return { width: '100%', height: '100%' };
+  const getStageSize = (): React.CSSProperties => {
+    const { width: cw, height: ch } = containerSize;
+    const { width: iw, height: ih } = imageSize;
+    if (!cw || !ch || !iw || !ih) {
+      return { width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%' };
     }
-    
-    const containerAspect = containerSize.width / containerSize.height;
-    const imageAspect = imageSize.width / imageSize.height;
-    
-    // We want to fit the image inside the container while maintaining aspect ratio
-    if (containerAspect > imageAspect) {
-      // Container is wider than image (image is relatively taller)
-      const height = containerSize.height;
-      const width = height * imageAspect;
-      return { 
-        height: `${height}px`, 
-        width: `${width}px` 
-      };
-    } else {
-      // Container is taller than image (image is relatively wider)
-      const width = containerSize.width;
-      const height = width / imageAspect;
-      return { 
-        width: `${width}px`, 
-        height: `${height}px` 
-      };
-    }
+
+    const scale = Math.min(cw / iw, ch / ih);
+    const width = iw * scale;
+    const height = ih * scale;
+    return {
+      width: `${width}px`,
+      height: `${height}px`,
+      maxWidth: '100%',
+      maxHeight: '100%',
+    };
   };
 
   return (
     <div 
       ref={containerRef} 
-      className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden cursor-none"
+      className="absolute inset-0 w-full h-full min-h-0 bg-kv-chrome flex items-center justify-center overflow-hidden cursor-none"
       onMouseMove={(e) => {
         const { clientX, clientY } = e;
         setMousePos({ x: clientX, y: clientY });
@@ -294,40 +285,40 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
           </div>
         )}
         
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black border-2 border-white px-2 py-2 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.5)] z-20">
-          <div className="flex items-center gap-1 pr-2 border-r border-white/20">
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-tsb border-2 border-eb-50 px-2 py-2 shadow-[8px_8px_0px_0px_rgba(30,55,145,0.45)] z-20">
+          <div className="flex items-center gap-1 pr-2 border-r border-eb-50/25">
             <button 
               onClick={() => setIsEraser(false)} 
-              className={`h-11 w-11 flex items-center justify-center transition-all ${!isEraser ? 'bg-[#ffb2c1] text-black shadow-inner shadow-black/20 font-black' : 'text-white hover:bg-white/10'}`}
+              className={`h-11 w-11 flex items-center justify-center transition-all ${!isEraser ? 'bg-coral-100 text-eb-900 shadow-inner shadow-eb-900/20 font-black' : 'text-eb-50 hover:bg-white/10'}`}
               title="Brush"
             >
               <Paintbrush2 className="w-5 h-5" />
             </button>
             <button 
               onClick={() => setIsEraser(true)} 
-              className={`h-11 w-11 flex items-center justify-center transition-all ${isEraser ? 'bg-[#ff6230] text-black shadow-inner shadow-black/20 font-black' : 'text-white hover:bg-white/10'}`}
+              className={`h-11 w-11 flex items-center justify-center transition-all ${isEraser ? 'bg-coral-500 text-eb-50 shadow-inner shadow-eb-900/20 font-black' : 'text-eb-50 hover:bg-white/10'}`}
               title="Eraser"
             >
               <div className="w-5 h-5 flex items-center justify-center font-black text-[12px]">E</div>
             </button>
           </div>
 
-          <button onClick={clearCanvas} className="h-11 w-11 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+          <button onClick={clearCanvas} className="h-11 w-11 flex items-center justify-center text-eb-50 hover:bg-white/10 transition-colors">
             <RotateCcw className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-2 text-[10px] font-black text-white tracking-widest px-4 border-l border-white/20">
+          <div className="flex items-center gap-2 text-[10px] font-black text-eb-50 tracking-widest px-4 border-l border-eb-50/25">
             Area Edit Tool
           </div>
         </div>
 
         <div className="absolute top-10 left-10 z-20 flex flex-col gap-2">
-          <div className="bg-[#ffb2c1] text-black px-4 py-2 border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[11px] font-black">
+          <div className="bg-coral-100 text-eb-900 px-4 py-2 border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] text-[11px] font-black">
             Selection Mode
           </div>
-          <div className="bg-white border-2 border-black p-4 text-[10px] font-bold text-black max-w-[240px] shadow-[6px_6px_0px_0px_rgba(0,0,0,0.1)] tracking-tight">
-            <span className="text-[#ff6230] font-black block mb-2 underline decoration-2">Pro Tip: Placement</span>
-            Paint the <span className="underline">exact spot</span> where the object's base touches the ground. The AI uses the <span className="bg-black text-white px-1">bottom</span> of your paint as the anchor.
+          <div className="bg-white border-2 border-eb-900 p-4 text-[10px] font-bold text-eb-900 max-w-[240px] shadow-[6px_6px_0px_0px_rgba(32,32,27,0.12)] tracking-tight">
+            <span className="text-coral-500 font-black block mb-2 underline decoration-2">Pro Tip: Placement</span>
+            Paint the <span className="underline">exact spot</span> where the object's base touches the ground. The AI uses the <span className="bg-eb-900 text-eb-50 px-1">bottom</span> of your paint as the anchor.
           </div>
         </div>
       </div>

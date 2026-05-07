@@ -75,6 +75,8 @@ export default function App() {
       sourceAI: "AI Generated",
       realPhoto: "real photo",
       aiVision: "AI vision",
+      takePhoto: "Take photo",
+      cancelCamera: "Cancel",
     },
     de: {
       tagline: "Berlin Transformations-Labor",
@@ -114,6 +116,8 @@ export default function App() {
       sourceAI: "KI-Generiert",
       realPhoto: "Echtes Foto",
       aiVision: "KI-Vision",
+      takePhoto: "Foto aufnehmen",
+      cancelCamera: "Abbrechen",
     }
   }[language];
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -138,6 +142,91 @@ export default function App() {
   const [hasApiKey, setHasApiKey] = useState(false);
   const [highQuality, setHighQuality] = useState(false);
   const canvasRef = useRef<any>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraFileFallbackRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+
+  const stopCameraStream = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const loadImageIntoEditor = useCallback(
+    (dataUrl: string, prompt: string) => {
+      setOriginalImage(dataUrl);
+      setCurrentImage(dataUrl);
+      setError(null);
+      setHistory([{ id: 'original', dataUrl, prompt, timestamp: Date.now() }]);
+      setEditMode('comparison');
+      setView('editor');
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+    const video = cameraVideoRef.current;
+    const stream = cameraStreamRef.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+    video.setAttribute('playsinline', 'true');
+    video.play().catch(() => {});
+  }, [cameraOpen]);
+
+  useEffect(() => {
+    return () => stopCameraStream();
+  }, [stopCameraStream]);
+
+  const openDeviceCamera = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      cameraFileFallbackRef.current?.click();
+      return;
+    }
+    const tryStream = async (constraints: MediaStreamConstraints) => {
+      const s = await navigator.mediaDevices.getUserMedia(constraints);
+      cameraStreamRef.current = s;
+      setCameraOpen(true);
+    };
+    try {
+      await tryStream({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    } catch {
+      try {
+        await tryStream({ video: { facingMode: 'user' }, audio: false });
+      } catch {
+        try {
+          await tryStream({ video: true, audio: false });
+        } catch {
+          cameraFileFallbackRef.current?.click();
+        }
+      }
+    }
+  }, []);
+
+  const closeCamera = useCallback(() => {
+    stopCameraStream();
+    setCameraOpen(false);
+  }, [stopCameraStream]);
+
+  const capturePhotoFromVideo = useCallback(() => {
+    const video = cameraVideoRef.current;
+    if (!video || video.readyState < 2) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    closeCamera();
+    loadImageIntoEditor(dataUrl, language === 'en' ? 'Camera capture' : 'Kameraaufnahme');
+  }, [closeCamera, loadImageIntoEditor, language]);
 
   useEffect(() => {
     const checkKey = async () => {
@@ -171,15 +260,11 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;
-      setOriginalImage(result);
-      setCurrentImage(result);
-      setError(null);
-      setHistory([{ id: 'original', dataUrl: result, prompt: 'Original Upload', timestamp: Date.now() }]);
-      setEditMode('comparison');
-      setView('editor');
+      loadImageIntoEditor(result, 'Original Upload');
       setProcessing({ isProcessing: false });
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleSaveToLibrary = () => {
@@ -449,6 +534,7 @@ export default function App() {
       } else {
         setError(err.message || "Failed to transform image");
       }
+      throw err instanceof Error ? err : new Error(String(err));
     } finally {
       setProcessing({ isProcessing: false });
     }
@@ -465,32 +551,32 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#f7f4ed] text-black font-sans selection:bg-black selection:text-white">
-      <header className="border-b-2 border-black bg-[#ffb2c1] sticky top-0 z-50">
+    <div className="min-h-screen bg-eb-50 text-eb-900 font-sans selection:bg-eb-900 selection:text-eb-50">
+      <header className="border-b-2 border-eb-900 bg-tsb sticky top-0 z-50">
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => setView('home')} className="bg-white p-0 h-10 w-10 flex items-center justify-center border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+            <button onClick={() => setView('home')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
               <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
-              <h1 className="text-2xl font-black tracking-tighter leading-none mb-1">KiezVision</h1>
+              <h1 className="text-2xl font-black tracking-tighter leading-none mb-1 text-eb-50">KiezVision</h1>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black bg-black text-white px-2 py-0.5">{t.tagline}</span>
+                <span className="text-[10px] font-black bg-coral-100 text-eb-900 px-2 py-0.5">{t.tagline}</span>
               </div>
             </div>
           </div>
           
           {view === 'editor' && originalImage && (
-            <div className="flex items-center gap-2 bg-black/5 p-1 border-2 border-black h-12">
+            <div className="flex items-center gap-2 bg-eb-50/15 p-1 border-2 border-eb-50/40 h-12">
               <button 
                 onClick={() => setEditMode('comparison')} 
-                className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'comparison' ? 'bg-black text-white' : 'text-black hover:bg-black/10'}`}
+                className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'comparison' ? 'bg-coral-100 text-eb-900' : 'text-eb-50 hover:bg-white/10'}`}
               >
                 <MousePointer2 className="w-4 h-4" /> {t.compare}
               </button>
               <button 
                 onClick={() => setEditMode('mask')} 
-                className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'mask' ? 'bg-black text-white' : 'text-black hover:bg-black/10'}`}
+                className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'mask' ? 'bg-coral-100 text-eb-900' : 'text-eb-50 hover:bg-white/10'}`}
               >
                 <Paintbrush2 className="w-4 h-4" /> {t.areaEdit}
               </button>
@@ -500,7 +586,7 @@ export default function App() {
           <div className="flex items-center gap-4 h-10">
             <button 
               onClick={() => setView('library')}
-              className={`flex items-center gap-2 px-6 h-full border-2 border-black text-xs font-black transition-all ${view === 'library' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]'}`}
+              className={`flex items-center gap-2 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === 'library' ? 'bg-eb-900 text-eb-50' : 'bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]'}`}
             >
               <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
             </button>
@@ -509,7 +595,7 @@ export default function App() {
               <div className="flex items-center gap-2 h-full">
                 <button 
                   onClick={handleSaveToLibrary} 
-                  className="bg-black text-white px-6 h-full border-2 border-black text-xs font-black transition-all shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] hover:shadow-none flex items-center gap-2"
+                  className="bg-eb-900 text-eb-50 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 flex items-center gap-2"
                 >
                   <Save className="w-4 h-4" /> <span className="hidden lg:inline">{t.save}</span>
                 </button>
@@ -523,23 +609,23 @@ export default function App() {
                     a.download = filename;
                     a.click();
                   }} 
-                  className="bg-black text-white px-4 h-full border-2 border-black text-xs font-black transition-all flex items-center justify-center"
+                  className="bg-eb-900 text-eb-50 px-4 h-full border-2 border-eb-900 text-xs font-black transition-all hover:bg-coral-500 flex items-center justify-center"
                 >
                   <Download className="w-4 h-4" />
                 </button>
               </div>
             )}
 
-            <div className="flex items-center border-2 border-black bg-white overflow-hidden shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] h-full">
+            <div className="flex items-center border-2 border-eb-900 bg-eb-50 overflow-hidden shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] h-full">
               <button 
                 onClick={() => setLanguage('en')}
-                className={`px-3 h-full text-[10px] font-black transition-all ${language === 'en' ? 'bg-black text-white' : 'text-black hover:bg-gray-100'}`}
+                className={`px-3 h-full text-[10px] font-black transition-all ${language === 'en' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'}`}
               >
                 EN
               </button>
               <button 
                 onClick={() => setLanguage('de')}
-                className={`px-3 h-full text-[10px] font-black transition-all border-l-2 border-black ${language === 'de' ? 'bg-black text-white' : 'text-black hover:bg-gray-100'}`}
+                className={`px-3 h-full text-[10px] font-black transition-all border-l-2 border-eb-900 ${language === 'de' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'}`}
               >
                 DE
               </button>
@@ -554,7 +640,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-[#f7f4ed] flex flex-col items-center justify-center text-center p-8 overflow-hidden"
+            className="fixed inset-0 z-[100] bg-eb-50 flex flex-col items-center justify-center text-center p-8 overflow-hidden"
           >
             {/* Pixel Leaf animation drawing */}
             <div className="flex items-center justify-center mb-12 scale-125">
@@ -562,26 +648,26 @@ export default function App() {
             </div>
 
             <div className="mb-6 relative z-20 mx-10">
-                <h2 className="text-4xl font-black tracking-tighter uppercase italic text-black">
+                <h2 className="text-4xl font-black tracking-tighter uppercase italic text-eb-900">
                   {t.fetchingStreet}
                 </h2>
             </div>
             
             <div className="flex flex-col gap-2 px-8 w-full max-w-md">
-              <p className="text-xl font-bold text-black uppercase tracking-tight animate-pulse min-h-[3rem]">
+              <p className="text-xl font-bold text-eb-900 uppercase tracking-tight animate-pulse min-h-[3rem]">
                 {processing.statusMessage}
               </p>
               
-              <div className="w-full h-3 bg-black/10 border-2 border-black relative overflow-hidden">
+              <div className="w-full h-3 bg-eb-900/10 border-2 border-eb-900 relative overflow-hidden">
                 <motion.div 
                   animate={{ x: ['-100%', '100%'] }}
                   transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute inset-0 w-1/3 bg-[#ff6230]"
+                  className="absolute inset-0 w-1/3 bg-coral-500"
                 />
               </div>
             </div>
 
-            <div className="mt-8 pt-8 border-t-2 border-black/10 text-[10px] font-black text-black/40">
+            <div className="mt-8 pt-8 border-t-2 border-eb-900/10 text-[10px] font-black text-eb-900/40">
               {t.tagline} • BLOCK_GEN_V2
             </div>
           </motion.div>
@@ -589,23 +675,23 @@ export default function App() {
 
         {view === 'home' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-6 text-center max-w-5xl mx-auto overflow-y-auto">
-            <div className="w-24 h-24 bg-white flex items-center justify-center mb-6 border-4 border-black shadow-[8px_8px_0px_0px_rgba(255,178,193,1)] rotate-3 overflow-hidden">
+            <div className="w-24 h-24 bg-white flex items-center justify-center mb-6 border-4 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] rotate-3 overflow-hidden">
               <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
             </div>
             <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter leading-[0.9]">{t.reimagine}<br/>{t.yourStreet}</h2>
-            <p className="text-black/60 mb-6 max-w-2xl text-lg font-bold tracking-tight">{t.subtitle}</p>
+            <p className="text-eb-900/60 mb-6 max-w-2xl text-lg font-bold tracking-tight">{t.subtitle}</p>
             
             <div className="w-full space-y-8">
-              <div className="bg-white border-4 border-black p-6 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
+              <div className="bg-white border-4 border-eb-900 p-6 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)]">
                 <div className="flex justify-center gap-2 mb-4">
                   {(['auto', 'real', 'vision'] as const).map((mode) => (
                     <button
                       key={mode}
                       onClick={() => setSearchMode(mode)}
-                      className={`px-4 h-10 text-[10px] font-black transition-all border-2 border-black ${
+                      className={`px-4 h-10 text-[10px] font-black transition-all border-2 border-eb-900 ${
                         searchMode === mode 
-                          ? 'bg-black text-white shadow-[4px_4px_0px_0px_rgba(255,178,193,1)]' 
-                          : 'bg-white text-black hover:bg-gray-50'
+                          ? 'bg-eb-900 text-eb-50 shadow-[4px_4px_0px_0px_rgba(255,207,214,1)]' 
+                          : 'bg-white text-eb-900 hover:bg-gray-50'
                       }`}
                     >
                       {mode === 'auto' ? t.autoDetect : mode === 'real' ? t.realPhotos : t.aiVisions}
@@ -614,18 +700,18 @@ export default function App() {
                 </div>
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-black h-16 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-black/20" disabled={processing.isProcessing} />
-                  <button type="submit" disabled={!searchQuery.trim() || processing.isProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 bg-[#ff6230] hover:bg-black text-white px-8 h-12 border-2 border-black font-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all">{t.go}</button>
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
+                  <button type="submit" disabled={!searchQuery.trim() || processing.isProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all">{t.go}</button>
                 </form>
 
-                <div className="mt-6 pt-6 border-t-2 border-black/10">
-                  <h3 className="text-[9px] font-black text-black mb-4">{t.exploreDistricts}</h3>
+                <div className="mt-6 pt-6 border-t-2 border-eb-900/10">
+                  <h3 className="text-[9px] font-black text-eb-900 mb-4">{t.exploreDistricts}</h3>
                   <div className="flex flex-wrap justify-center gap-2">
                     {BERLIN_DISTRICTS.map(district => (
                       <button 
                         key={district}
                         onClick={() => handleSearch(district)}
-                        className="px-3 h-9 border-2 border-black bg-white text-[10px] font-black hover:bg-black hover:text-white transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,0.1)] hover:shadow-none"
+                        className="px-3 h-9 border-2 border-eb-900 bg-white text-[10px] font-black hover:bg-eb-900 hover:text-eb-50 transition-all shadow-[2px_2px_0px_0px_rgba(32,32,27,0.1)] hover:shadow-none"
                       >
                         {district}
                       </button>
@@ -635,15 +721,26 @@ export default function App() {
               </div>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2 text-center">
-                <label className="group w-full sm:w-auto cursor-pointer bg-white text-black px-8 h-16 border-2 border-black shadow-[6px_6px_0px_0px_rgba(255,178,193,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
+                <label className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
                   <Upload className="w-6 h-6" /> {t.uploadPhoto}
                   <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
                 </label>
                 
-                <label className="group w-full sm:w-auto cursor-pointer bg-white text-black px-8 h-16 border-2 border-black shadow-[6px_6px_0px_0px_rgba(255,92,51,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
+                <button
+                  type="button"
+                  onClick={openDeviceCamera}
+                  className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(254,68,65,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter"
+                >
                   <Camera className="w-6 h-6" /> {t.capture}
-                  <input type="file" accept="image/*" capture="environment" onChange={handleFileUpload} className="hidden" />
-                </label>
+                </button>
+                <input
+                  ref={cameraFileFallbackRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
               </div>
             </div>
           </div>
@@ -651,9 +748,9 @@ export default function App() {
 
         {view === 'library' && (
           <div className="max-w-7xl mx-auto p-12">
-            <div className="flex items-center justify-between mb-16 border-b-4 border-black pb-8">
+            <div className="flex items-center justify-between mb-16 border-b-4 border-eb-900 pb-8">
               <div>
-                <button onClick={() => setView('home')} className="flex items-center gap-2 text-black font-black mb-4 border-2 border-black px-4 h-10 bg-[#ffb2c1] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-none transition-all">
+                <button onClick={() => setView('home')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
                   <ArrowLeft className="w-4 h-4" /> {t.backToHome}
                 </button>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
@@ -663,19 +760,19 @@ export default function App() {
             {/* Featured Section */}
             <div className="mb-20">
               <div className="flex items-center gap-4 mb-10">
-                <div className="bg-black text-white px-4 py-2 text-sm font-black">
+                <div className="bg-tsb text-eb-50 px-4 py-2 text-sm font-black">
                   {t.featuredStreets}
                 </div>
-                <div className="h-0.5 flex-1 bg-black/10" />
+                <div className="h-0.5 flex-1 bg-eb-900/10" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
                 {EXAMPLE_LIBRARY.map((item) => (
-                  <div key={item.id} className="group relative bg-white border-2 border-black shadow-[12px_12px_0px_0px_rgba(255,178,193,1)] hover:shadow-none transition-all">
-                    <div className="aspect-[4/3] w-full border-b-2 border-black overflow-hidden bg-gray-100">
+                  <div key={item.id} className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] hover:shadow-none transition-all">
+                    <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
                       <img src={item.dataUrl} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" alt={item.prompt} />
                     </div>
                     <div className="p-8">
-                      <p className="text-[10px] font-black text-black mb-6 border-l-4 border-black pl-4 leading-relaxed">{item.prompt}</p>
+                      <p className="text-[10px] font-black text-eb-900 mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
                       <button 
                         onClick={() => {
                           setProcessing({ isProcessing: true, statusMessage: t.loading });
@@ -689,7 +786,7 @@ export default function App() {
                             setProcessing({ isProcessing: false });
                           }, 500);
                         }}
-                        className="w-full bg-black text-white h-14 text-xs font-black hover:bg-[#ff6230] transition-all flex items-center justify-center gap-3"
+                        className="w-full bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-500 transition-all flex items-center justify-center gap-3"
                       >
                         <Wand2 className="w-5 h-5" /> {t.startTransformation}
                       </button>
@@ -703,19 +800,19 @@ export default function App() {
             {library.filter(item => !item.id.startsWith('ex')).length > 0 && (
               <div>
                 <div className="flex items-center gap-4 mb-10">
-                  <div className="bg-black text-white px-4 py-2 text-sm font-black">
+                  <div className="bg-tsb text-eb-50 px-4 py-2 text-sm font-black">
                     {t.yourSavedVisions}
                   </div>
-                  <div className="h-0.5 flex-1 bg-black/10" />
+                  <div className="h-0.5 flex-1 bg-eb-900/10" />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
                   {library.filter(item => !item.id.startsWith('ex')).map((item) => (
-                    <div key={item.id} className="group relative bg-white border-2 border-black shadow-[12px_12px_0px_0px_rgba(255,92,51,1)] hover:shadow-none transition-all">
-                      <div className="aspect-[4/3] w-full border-b-2 border-black overflow-hidden bg-gray-100">
+                    <div key={item.id} className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] hover:shadow-none transition-all">
+                      <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
                         <img src={item.dataUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={item.prompt} />
                       </div>
                       <div className="p-8">
-                        <p className="text-[10px] font-black mb-6 border-l-4 border-black pl-4 leading-relaxed">{item.prompt}</p>
+                        <p className="text-[10px] font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
                         <div className="flex items-center gap-4">
                           <button 
                             onClick={() => {
@@ -725,13 +822,13 @@ export default function App() {
                               setView('editor');
                               setEditMode('comparison');
                             }}
-                            className="flex-1 bg-black text-white h-14 text-xs font-black hover:bg-[#ffb2c1] hover:text-black transition-all"
+                            className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all"
                           >
                             {t.openInEditor}
                           </button>
                           <button 
                             onClick={() => removeFromLibrary(item.id)}
-                            className="h-14 w-14 flex items-center justify-center bg-red-600 text-white border-2 border-black hover:bg-black transition-all"
+                            className="h-14 w-14 flex items-center justify-center bg-red-600 text-eb-50 border-2 border-eb-900 hover:bg-eb-900 transition-all"
                           >
                             <Trash2 className="w-5 h-5" />
                           </button>
@@ -746,32 +843,32 @@ export default function App() {
         )}
 
         {view === 'editor' && originalImage && (
-          <div className="grid grid-cols-12 h-[calc(100vh-80px)]">
-            <div className="col-span-12 lg:col-span-8 flex flex-col h-full bg-white border-r-2 border-black">
-              <div className="relative flex-1 bg-[#e5e5e5] overflow-hidden flex items-center justify-center">
+          <div className="grid grid-cols-12 h-[calc(100vh-80px)] min-h-0">
+            <div className="col-span-12 lg:col-span-8 flex flex-col h-full min-h-0 bg-white border-r-2 border-eb-900">
+              <div className="relative flex-1 min-h-0 bg-kv-chrome overflow-hidden">
                  {processing.isProcessing && (
                    <motion.div 
                      initial={{ opacity: 0 }}
                      animate={{ opacity: 1 }}
-                     className="absolute inset-0 z-40 bg-[#f7f4ed] flex flex-col items-center justify-center text-center p-8"
+                     className="absolute inset-0 z-40 bg-eb-50 flex flex-col items-center justify-center text-center p-8"
                    >
                      <div className="flex items-center justify-center mb-6 scale-75">
                         <PixelLeafLoader />
                      </div>
-                     <div className="text-black px-4 py-2 text-lg font-black tracking-tighter mb-2 italic uppercase">
+                     <div className="text-eb-900 px-4 py-2 text-lg font-black tracking-tighter mb-2 italic uppercase">
                        {processing.statusMessage}
                      </div>
-                     <div className="h-1 bg-black w-32 overflow-hidden shadow-[2px_2px_0_0_#ff6230]">
+                     <div className="h-1 bg-eb-900 w-32 overflow-hidden shadow-[2px_2px_0_0_#FE4441]">
                         <motion.div 
                           animate={{ left: ['-100%', '100%'] }}
                           transition={{ duration: 1.5, repeat: Infinity }}
-                          className="relative h-full w-1/2 bg-[#ff6230]"
+                          className="relative h-full w-1/2 bg-coral-500"
                         />
                      </div>
                    </motion.div>
                  )}
 
-                 <div className="relative w-full h-full bg-black">
+                 <div className="absolute inset-0 min-h-0 bg-kv-chrome">
                   {editMode !== 'comparison' ? (
                     <InpaintCanvas 
                         ref={canvasRef}
@@ -789,8 +886,8 @@ export default function App() {
 
                  {imageSource && !processing.isProcessing && (
                    <div className="absolute bottom-10 left-10 z-30 flex flex-col gap-2">
-                     <div className="flex flex-col gap-0 border-2 border-black bg-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
-                       <div className="bg-black text-white px-3 py-1 text-[10px] font-black">
+                     <div className="flex flex-col gap-0 border-2 border-eb-900 bg-white shadow-[6px_6px_0px_0px_rgba(32,32,27,1)]">
+                       <div className="bg-tsb text-eb-50 px-3 py-1 text-[10px] font-black">
                          Source: {imageSource.includes('Mapillary') ? 'Photographic' : 'Synthetic'}
                        </div>
                        <div className="px-4 py-2">
@@ -805,7 +902,7 @@ export default function App() {
                            href={mapillaryMetadata.link} 
                            target="_blank" 
                            rel="noreferrer" 
-                           className="flex items-center gap-2 bg-[#ffb2c1] border-2 border-black px-4 py-2 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-none transition-all w-fit"
+                           className="flex items-center gap-2 bg-coral-100 border-2 border-eb-900 px-4 py-2 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all w-fit"
                          >
                            External Imagery View
                          </a>
@@ -816,23 +913,23 @@ export default function App() {
               </div>
 
               {/* Version History Footer Slider */}
-              <div className="bg-white border-t-2 border-black p-6">
+              <div className="bg-white border-t-2 border-eb-900 p-6">
                 <div className="flex items-center justify-between mb-4">
                    <h3 className="text-[11px] font-black flex items-center gap-2">
                      <History className="w-4 h-4" /> {t.iterations}
                    </h3>
-                   <button onClick={() => { if(confirm(language === 'en' ? "Discard project?" : "Projekt verwerfen?")) window.location.reload(); }} className="text-[10px] font-black text-black/40 hover:text-red-600 transition-all">
+                   <button onClick={() => { if(confirm(language === 'en' ? "Discard project?" : "Projekt verwerfen?")) window.location.reload(); }} className="text-[10px] font-black text-eb-900/40 hover:text-red-600 transition-all">
                      {t.clearHistory}
                    </button>
                 </div>
                 <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
                    {history.map((img, idx) => (
-                    <button key={img.id} onClick={() => setCurrentImage(img.dataUrl)} className={`flex-shrink-0 relative w-40 border-2 transition-all text-left ${currentImage === img.dataUrl ? 'border-black ring-4 ring-black/5 bg-black' : 'border-black/10 grayscale hover:grayscale-0 hover:border-black'}`}>
+                    <button key={img.id} onClick={() => setCurrentImage(img.dataUrl)} className={`flex-shrink-0 relative w-40 border-2 transition-all text-left ${currentImage === img.dataUrl ? 'border-coral-500 ring-4 ring-coral-500/25 bg-eb-900' : 'border-eb-900/10 grayscale hover:grayscale-0 hover:border-eb-900'}`}>
                        <div className="aspect-[4/3] w-full bg-gray-100">
                          <img src={img.dataUrl} className="w-full h-full object-cover" alt={`V${history.length - idx}`} />
                        </div>
-                       <div className="p-2 bg-white border-t-2 border-black">
-                          <p className="text-[9px] font-black truncate leading-none">IDX_{history.length - idx} • {img.prompt}</p>
+                       <div className="p-2 bg-white border-t-2 border-eb-900">
+                          <p className={`text-[9px] font-black truncate leading-none ${currentImage === img.dataUrl ? 'text-eb-50' : 'text-eb-900'}`}>IDX_{history.length - idx} • {img.prompt}</p>
                        </div>
                     </button>
                   ))}
@@ -841,18 +938,19 @@ export default function App() {
             </div>
 
             {/* Sidebar Controls */}
-            <div className="col-span-12 lg:col-span-4 h-full bg-[#ff6230] flex flex-col p-8 overflow-y-auto custom-scrollbar border-t-2 lg:border-t-0 border-black">
-              <div className="mb-10 bg-black text-white p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.2)]">
+            <div className="col-span-12 lg:col-span-4 h-full bg-coral-500 flex flex-col p-8 overflow-y-auto custom-scrollbar border-t-2 lg:border-t-0 border-eb-900">
+              <div className="mb-10 bg-tsb text-eb-50 p-4 shadow-[8px_8px_0px_0px_rgba(30,55,145,0.35)]">
                 <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
                   <Wand2 className="w-6 h-6" /> {t.toolkit}
                 </h2>
               </div>
 
               <div className="space-y-10">
-                <div className="bg-white border-2 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                {editMode === 'mask' && (
+                <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xs font-black border-b-2 border-black pb-1">{t.size}</h3>
-                    <span className="font-mono text-xs bg-black text-white px-2 py-0.5">{brushSize}PX</span>
+                    <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.size}</h3>
+                    <span className="font-mono text-xs bg-eb-900 text-eb-50 px-2 py-0.5">{brushSize}PX</span>
                   </div>
                   <input 
                     type="range" 
@@ -860,17 +958,18 @@ export default function App() {
                     max="150" 
                     value={brushSize} 
                     onChange={(e) => setBrushSize(parseInt(e.target.value))} 
-                    className="w-full h-6 accent-black appearance-none bg-gray-100 border border-black cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-black [&::-webkit-slider-thumb]:rounded-none" 
+                    className="w-full h-6 accent-eb-900 appearance-none bg-gray-100 border border-eb-900 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-eb-900 [&::-webkit-slider-thumb]:rounded-none" 
                   />
                 </div>
+                )}
 
-                <div className="bg-white border-2 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                  <h3 className="text-xs font-black border-b-2 border-black pb-1">{t.presets}</h3>
+                <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
+                  <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.presets}</h3>
                   <QuickActions onAction={handleTransform} disabled={processing.isProcessing} language={language} />
                 </div>
                 
-                <div className="bg-white border-2 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                  <h3 className="text-xs font-black border-b-2 border-black pb-1">{t.customCommand}</h3>
+                <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
+                  <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.customCommand}</h3>
                   <TransformationPanel 
                     onTransform={handleTransform} 
                     isProcessing={processing.isProcessing} 
@@ -881,13 +980,48 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="mt-12 text-[9px] font-black text-black/50 border-t border-black/20 pt-4 text-center">
+              <div className="mt-12 text-[9px] font-black text-eb-900/50 border-t border-eb-900/20 pt-4 text-center">
                 {t.tagline}
               </div>
             </div>
           </div>
         )}
       </main>
+
+      <AnimatePresence>
+        {cameraOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-eb-900/92 backdrop-blur-sm p-4"
+          >
+            <video
+              ref={cameraVideoRef}
+              className="w-full max-w-2xl max-h-[min(70vh,640px)] rounded-lg border-4 border-eb-50 object-cover bg-black"
+              muted
+              playsInline
+              autoPlay
+            />
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+              <button
+                type="button"
+                onClick={closeCamera}
+                className="px-8 h-14 border-2 border-eb-50 bg-transparent text-eb-50 text-sm font-black hover:bg-eb-50/10 transition-all"
+              >
+                {t.cancelCamera}
+              </button>
+              <button
+                type="button"
+                onClick={capturePhotoFromVideo}
+                className="px-8 h-14 border-2 border-eb-900 bg-coral-500 text-eb-50 text-sm font-black shadow-[4px_4px_0px_0px_rgba(250,250,242,0.4)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+              >
+                {t.takePhoto}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {error && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-900/95 text-red-100 px-8 py-4 rounded-2xl border border-red-700 backdrop-blur-xl flex flex-col sm:flex-row items-center gap-4 animate-in slide-in-from-bottom-4 shadow-2xl z-[100] max-w-[90vw]">
@@ -908,7 +1042,7 @@ export default function App() {
                 Try AI Vision
               </button>
             )}
-            <button onClick={() => setError(null)} className="text-white hover:bg-white/10 p-2 rounded-full transition-colors">✕</button>
+            <button onClick={() => setError(null)} className="text-eb-50 hover:bg-white/10 p-2 rounded-full transition-colors">✕</button>
           </div>
         </div>
       )}
