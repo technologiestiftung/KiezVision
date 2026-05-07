@@ -4,13 +4,13 @@ import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
   History, RotateCcw, Search, MousePointer2, Paintbrush2, 
-  Sliders, Wand2, Camera, Library, Save, ArrowLeft, Trash2
+  Sliders, Wand2, Camera, Library, Save, ArrowLeft, Trash2, FolderOpen
 } from 'lucide-react';
 import { BeforeAfterSlider } from './components/BeforeAfterSlider';
 import { InpaintCanvas } from './components/InpaintCanvas';
 import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
-import { transformImage, generateImage } from './services/geminiService';
+import { transformImage } from './services/geminiService';
 import { geocodeBerlin, fetchMapillaryImage } from './services/mapillaryService';
 import { GeneratedImage, ProcessingState } from './types';
 
@@ -33,7 +33,7 @@ const EXAMPLE_LIBRARY = [
 ];
 
 export default function App() {
-  const [view, setView] = useState<'home' | 'editor' | 'library'>('home');
+  const [view, setView] = useState<'home' | 'editor' | 'library' | 'image-gallery'>('home');
   const [language, setLanguage] = useState<'en' | 'de'>('en');
 
   const t = {
@@ -44,15 +44,17 @@ export default function App() {
       yourStreet: "Your Street",
       searchPlaceholder: "Search for a street (e.g. Kurfürstendamm)...",
       autoDetect: "Auto Detect",
-      realPhotos: "Real Photos",
-      aiVisions: "AI Visions",
+      realPhotos: "Street Image",
       go: "GO",
       exploreDistricts: "Explore Districts",
       uploadPhoto: "Upload Photo",
+      openFolder: "Open Folder",
       capture: "Capture",
       library: "Library",
       backToHome: "Back to Home",
       imageLibrary: "Image Library",
+      imageGallery: "Image Gallery",
+      editThisImage: "Edit this image",
       featuredStreets: "Featured Berlin Streets",
       yourSavedVisions: "Your Saved Visions",
       openInEditor: "Open in Editor",
@@ -85,15 +87,17 @@ export default function App() {
       yourStreet: "neu denken",
       searchPlaceholder: "Nach einer Straße suchen (z.B. Kurfürstendamm)...",
       autoDetect: "Auto-Erkennung",
-      realPhotos: "Echte Fotos",
-      aiVisions: "KI-Visionen",
+      realPhotos: "Straßenbild",
       go: "LOS",
       exploreDistricts: "Bezirke erkunden",
       uploadPhoto: "Foto hochladen",
+      openFolder: "Ordner öffnen",
       capture: "Aufnehmen",
       library: "Galerie",
       backToHome: "Zurück zum Start",
       imageLibrary: "Bildgalerie",
+      imageGallery: "Bildergalerie",
+      editThisImage: "Dieses Bild bearbeiten",
       featuredStreets: "Ausgewählte Berliner Straßen",
       yourSavedVisions: "Ihre gespeicherten Visionen",
       openInEditor: "Im Editor öffnen",
@@ -127,10 +131,12 @@ export default function App() {
     const saved = localStorage.getItem('kiezvision_library');
     return saved ? JSON.parse(saved) : EXAMPLE_LIBRARY;
   });
+  const [uploadedGallery, setUploadedGallery] = useState<GeneratedImage[]>([]);
+  const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false });
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<'auto' | 'real' | 'vision'>('auto');
+  const [searchMode, setSearchMode] = useState<'auto' | 'real'>('auto');
   const [imageSource, setImageSource] = useState<string | null>(null);
   const [fetchedLocation, setFetchedLocation] = useState<string | null>(null);
   const [mapillaryMetadata, setMapillaryMetadata] = useState<{ link: string; capturedAt?: string } | null>(null);
@@ -147,6 +153,35 @@ export default function App() {
   const cameraFileFallbackRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
 
+  const setRoute = useCallback((nextView: typeof view) => {
+    const nextPath =
+      nextView === 'image-gallery'
+        ? '/image-gallery'
+        : nextView === 'library'
+          ? '/library'
+          : nextView === 'editor'
+            ? '/editor'
+            : '/';
+
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setView(nextView);
+  }, []);
+
+  useEffect(() => {
+    const syncFromPath = () => {
+      const path = window.location.pathname || '/';
+      if (path === '/image-gallery') setView('image-gallery');
+      else if (path === '/library') setView('library');
+      else if (path === '/editor') setView('editor');
+      else setView('home');
+    };
+    syncFromPath();
+    window.addEventListener('popstate', syncFromPath);
+    return () => window.removeEventListener('popstate', syncFromPath);
+  }, []);
+
   const stopCameraStream = useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
@@ -162,9 +197,9 @@ export default function App() {
       setError(null);
       setHistory([{ id: 'original', dataUrl, prompt, timestamp: Date.now() }]);
       setEditMode('comparison');
-      setView('editor');
+      setRoute('editor');
     },
-    []
+    [setRoute]
   );
 
   useEffect(() => {
@@ -267,6 +302,53 @@ export default function App() {
     e.target.value = '';
   };
 
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+    if (!files.length) return;
+
+    setProcessing({ isProcessing: true, statusMessage: language === 'en' ? 'Processing your images...' : 'Bilder werden verarbeitet...' });
+    setError(null);
+
+    try {
+      const imageFiles = files
+        .filter((f) => f.type.startsWith('image/'))
+        .sort((a, b) => {
+          const aLabel = (a as File & { webkitRelativePath?: string }).webkitRelativePath || a.name;
+          const bLabel = (b as File & { webkitRelativePath?: string }).webkitRelativePath || b.name;
+          return aLabel.localeCompare(bLabel);
+        });
+
+      const readAsDataUrl = (file: File) =>
+        new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(new Error('Failed to read file'));
+          r.readAsDataURL(file);
+        });
+
+      const entries: GeneratedImage[] = [];
+      for (const file of imageFiles) {
+        const dataUrl = await readAsDataUrl(file);
+        const label = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        entries.push({
+          id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          dataUrl,
+          prompt: label,
+          timestamp: Date.now(),
+        });
+      }
+
+      setUploadedGallery(entries);
+      setSelectedGalleryId(entries[0]?.id ?? null);
+      setRoute('image-gallery');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to process folder upload.');
+    } finally {
+      setProcessing({ isProcessing: false });
+      e.target.value = '';
+    }
+  };
+
   const handleSaveToLibrary = () => {
     if (!currentImage) return;
     const newEntry: GeneratedImage = {
@@ -290,50 +372,42 @@ export default function App() {
     setError(null);
     try {
       let imageData: string | null = null;
-      let source = language === 'en' ? 'AI Generated' : 'KI-Generiert';
+      let source = language === 'en' ? 'Mapillary Real Image' : 'Echtes Bild';
       let mMeta: { link: string; capturedAt?: string } | null = null;
       let displayLocation = query;
 
-      // 1. Try Mapillary if mode is 'auto' or 'real'
-      if (searchMode !== 'vision') {
-        setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `Locating ${query}...` : `${query} wird gesucht...` });
-        const geo = await geocodeBerlin(query);
+      // 1. Try Mapillary
+      setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `Locating ${query}...` : `${query} wird gesucht...` });
+      const geo = await geocodeBerlin(query);
+      
+      if (geo) {
+        displayLocation = geo.displayName;
+        setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `Searching Mapillary near ${geo.displayName}...` : `Suche bei Mapillary in der Nähe von ${geo.displayName}...` });
+        let mData = await fetchMapillaryImage(geo.lat, geo.lng);
         
-        if (geo) {
-          displayLocation = geo.displayName;
-          setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `Searching Mapillary near ${geo.displayName}...` : `Suche bei Mapillary in der Nähe von ${geo.displayName}...` });
-          let mData = await fetchMapillaryImage(geo.lat, geo.lng);
-          
-          // Fuzzy Fallback: If specific address fails, try the street name
-          if (!mData && query.match(/\d+/)) {
-            const streetOnly = query.replace(/\d+/, '').trim();
-            setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `Address specific view not found. Trying ${streetOnly}...` : `Keine genaue Adresse gefunden. Versuche ${streetOnly}...` });
-            const geoStreet = await geocodeBerlin(streetOnly);
-            if (geoStreet) {
-              mData = await fetchMapillaryImage(geoStreet.lat, geoStreet.lng);
-            }
+        // Fuzzy Fallback: If specific address fails, try the street name
+        if (!mData && query.match(/\d+/)) {
+          const streetOnly = query.replace(/\d+/, '').trim();
+          setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `Address specific view not found. Trying ${streetOnly}...` : `Keine genaue Adresse gefunden. Versuche ${streetOnly}...` });
+          const geoStreet = await geocodeBerlin(streetOnly);
+          if (geoStreet) {
+            mData = await fetchMapillaryImage(geoStreet.lat, geoStreet.lng);
           }
+        }
 
-          if (mData) {
-            imageData = mData.url;
-            source = language === 'en' ? 'Mapillary Real Image' : 'Echtes Bild';
-            mMeta = { link: mData.link, capturedAt: mData.capturedAt };
-          }
+        if (mData) {
+          imageData = mData.url;
+          source = language === 'en' ? 'Mapillary Real Image' : 'Echtes Bild';
+          mMeta = { link: mData.link, capturedAt: mData.capturedAt };
         }
       }
 
-      // 2. Fallback to AI generation if Mapillary fails (and mode is not 'real') or if mode is 'vision'
+      // 2. If Mapillary fails, stop (AI Visions removed)
       if (!imageData) {
-        if (searchMode === 'real') {
-          throw new Error(language === 'en' 
-            ? `No street-level imagery found for "${query}". Try searching for major intersections or switch to AI Vision mode.`
-            : `Keine echten Straßenbilder für "${query}" gefunden. Versuchen Sie es mit großen Kreuzungen oder wechseln Sie in den KI-Modus.`
-          );
-        }
-        setProcessing({ isProcessing: true, statusMessage: language === 'en' ? `No real imagery found. Generating AI vision for ${query}...` : `Keine echten Bilder gefunden. Generiere KI-Vision für ${query}...` });
-        imageData = await generateImage(query, highQuality);
-        source = language === 'en' ? 'AI Generated' : 'KI-Generiert';
-        mMeta = null;
+        throw new Error(language === 'en' 
+          ? `No street-level imagery found for "${query}". Try searching for major intersections or a nearby landmark.`
+          : `Keine Straßenbilder für "${query}" gefunden. Versuchen Sie es mit großen Kreuzungen oder einer nahegelegenen Sehenswürdigkeit.`
+        );
       }
 
       setOriginalImage(imageData);
@@ -554,7 +628,7 @@ export default function App() {
       <header className="border-b-2 border-eb-900 bg-tsb sticky top-0 z-50">
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => setView('home')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+            <button onClick={() => setRoute('home')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
               <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
@@ -584,7 +658,7 @@ export default function App() {
 
           <div className="flex items-center gap-4 h-10">
             <button 
-              onClick={() => setView('library')}
+              onClick={() => setRoute('library')}
               className={`flex items-center gap-2 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === 'library' ? 'bg-eb-900 text-eb-50' : 'bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]'}`}
             >
               <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
@@ -682,20 +756,27 @@ export default function App() {
             
             <div className="w-full space-y-8">
               <div className="bg-white border-4 border-eb-900 p-6 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)]">
-                <div className="flex justify-center gap-2 mb-4">
-                  {(['auto', 'real', 'vision'] as const).map((mode) => (
+                <div className="flex justify-center mb-4">
+                  <div className="flex items-center border-2 border-eb-900 bg-white overflow-hidden shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] h-10">
                     <button
-                      key={mode}
-                      onClick={() => setSearchMode(mode)}
-                      className={`px-4 h-10 text-[10px] font-black transition-all border-2 border-eb-900 ${
-                        searchMode === mode 
-                          ? 'bg-eb-900 text-eb-50 shadow-[4px_4px_0px_0px_rgba(255,207,214,1)]' 
-                          : 'bg-white text-eb-900 hover:bg-gray-50'
+                      type="button"
+                      onClick={() => setSearchMode('auto')}
+                      className={`px-4 h-full text-[10px] font-black transition-all ${
+                        searchMode === 'auto' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'
                       }`}
                     >
-                      {mode === 'auto' ? t.autoDetect : mode === 'real' ? t.realPhotos : t.aiVisions}
+                      {t.autoDetect}
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => setSearchMode('real')}
+                      className={`px-4 h-full text-[10px] font-black transition-all border-l-2 border-eb-900 ${
+                        searchMode === 'real' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'
+                      }`}
+                    >
+                      {t.realPhotos}
+                    </button>
+                  </div>
                 </div>
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
@@ -724,6 +805,18 @@ export default function App() {
                   <Upload className="w-6 h-6" /> {t.uploadPhoto}
                   <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
                 </label>
+
+                <label className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
+                  <FolderOpen className="w-6 h-6" /> {t.openFolder}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    {...({ webkitdirectory: '', directory: '' } as any)}
+                    onChange={handleFolderUpload}
+                    className="hidden"
+                  />
+                </label>
                 
                 <button
                   type="button"
@@ -749,7 +842,7 @@ export default function App() {
           <div className="max-w-7xl mx-auto p-12">
             <div className="flex items-center justify-between mb-16 border-b-4 border-eb-900 pb-8">
               <div>
-                <button onClick={() => setView('home')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
+                <button onClick={() => setRoute('home')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
                   <ArrowLeft className="w-4 h-4" /> {t.backToHome}
                 </button>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
@@ -779,7 +872,7 @@ export default function App() {
                             setOriginalImage(item.dataUrl);
                             setCurrentImage(item.dataUrl);
                             setHistory([{ ...item, id: 'original' }]);
-                            setView('editor');
+                            setRoute('editor');
                             setEditMode('comparison');
                             setImageSource(t.sourceMapillary);
                             setProcessing({ isProcessing: false });
@@ -818,7 +911,7 @@ export default function App() {
                               setOriginalImage(item.dataUrl);
                               setCurrentImage(item.dataUrl);
                               setHistory([{ ...item, id: 'original' }]);
-                              setView('editor');
+                              setRoute('editor');
                               setEditMode('comparison');
                             }}
                             className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all"
@@ -835,6 +928,84 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {view === 'image-gallery' && (
+          <div className="max-w-7xl mx-auto p-8 h-[calc(100vh-80px)] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-10 border-b-4 border-eb-900 pb-6 flex-shrink-0">
+              <div>
+                <h2 className="text-5xl md:text-6xl font-black tracking-tighter leading-none">{t.imageGallery}</h2>
+              </div>
+            </div>
+
+            {uploadedGallery.length === 0 ? (
+              <div className="bg-white border-4 border-eb-900 p-10 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)]">
+                <p className="text-lg font-black tracking-tight text-eb-900">
+                  {language === 'en'
+                    ? 'No folder images loaded yet. Go back and select a folder.'
+                    : 'Noch keine Ordnerbilder geladen. Gehen Sie zurück und wählen Sie einen Ordner.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-12 gap-8 flex-1 min-h-0 overflow-hidden">
+                {/* Thumbnail Rail */}
+                <div className="col-span-12 lg:col-span-3 min-h-0 overflow-hidden">
+                  <div className="bg-white border-2 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] overflow-hidden h-full flex flex-col min-h-0">
+                    <div className="bg-tsb text-eb-50 px-4 py-2 text-[10px] font-black">
+                      {language === 'en' ? 'Uploaded images' : 'Hochgeladene Bilder'} • {uploadedGallery.length}
+                    </div>
+                    <div className="overflow-y-auto custom-scrollbar p-4 flex flex-col gap-5 flex-1 min-h-0">
+                      {uploadedGallery.map((img) => (
+                        <button
+                          key={img.id}
+                          onClick={() => setSelectedGalleryId(img.id)}
+                          className={`w-full h-28 sm:h-32 lg:h-36 flex-shrink-0 overflow-hidden transition-all ${
+                            selectedGalleryId === img.id ? 'border-4 border-coral-500' : 'border-2 border-eb-900/20 hover:border-eb-900'
+                          }`}
+                          title={img.prompt}
+                        >
+                          <img src={img.dataUrl} className="w-full h-full object-cover" alt={img.prompt} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Preview + CTA */}
+                <div className="col-span-12 lg:col-span-9 min-h-0 overflow-hidden">
+                  {(() => {
+                    const selected = uploadedGallery.find((x) => x.id === selectedGalleryId) || uploadedGallery[0];
+                    return (
+                      <div className="bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)] overflow-hidden h-full flex flex-col min-h-0">
+                        <div className="flex items-center justify-between gap-4 border-b-4 border-eb-900 p-5 bg-kv-chrome">
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-black text-eb-900/60 uppercase tracking-widest">
+                              {language === 'en' ? 'Selected' : 'Ausgewählt'}
+                            </div>
+                            <div className="text-lg md:text-xl font-black tracking-tighter truncate">
+                              {selected?.prompt || (language === 'en' ? 'Image' : 'Bild')}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => selected && loadImageIntoEditor(selected.dataUrl, selected.prompt)}
+                            className="bg-eb-900 text-eb-50 px-6 h-12 border-2 border-eb-900 text-xs font-black transition-all shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 flex items-center gap-2 whitespace-nowrap"
+                          >
+                            <Wand2 className="w-4 h-4" /> {t.editThisImage}
+                          </button>
+                        </div>
+                        <div className="w-full bg-gray-100 flex-1 min-h-0">
+                          {selected && (
+                            <img src={selected.dataUrl} className="w-full h-full object-contain" alt={selected.prompt} />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -1029,18 +1200,6 @@ export default function App() {
             <p className="text-sm font-bold tracking-tight">{error}</p>
           </div>
           <div className="flex items-center gap-3">
-            {error.includes("Real imagery not found") && (
-              <button 
-                onClick={() => {
-                  setSearchMode('vision');
-                  setError(null);
-                  handleSearch(searchQuery);
-                }}
-                className="bg-white text-red-900 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-100 transition-colors whitespace-nowrap"
-              >
-                Try AI Vision
-              </button>
-            )}
             <button onClick={() => setError(null)} className="text-eb-50 hover:bg-white/10 p-2 rounded-full transition-colors">✕</button>
           </div>
         </div>
