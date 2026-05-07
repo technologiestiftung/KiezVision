@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 const getAiClient = () => {
   // Priority: 1. API_KEY (from selection dialog), 2. CUSTOM_GEMINI_API_KEY (from secrets), 3. GEMINI_API_KEY (default)
@@ -72,6 +72,17 @@ const ensureBase64 = async (imageInput: string): Promise<string> => {
     // Return original and hope it works (might still be a base64 string without prefix)
     return imageInput;
   }
+};
+
+/** Correct MIME + raw base64 from a data URL (Gemini is sensitive to PNG vs JPEG). */
+const mimeAndBase64FromDataUrl = (
+  imageInput: string,
+): { mimeType: string; base64: string } | null => {
+  const m = imageInput.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return null;
+  let mime = m[1].toLowerCase();
+  if (mime === "image/jpg") mime = "image/jpeg";
+  return { mimeType: mime, base64: m[2] };
 };
 
 /**
@@ -189,45 +200,55 @@ export const transformImage = async (
     maskBase64 ? ensureBase64(maskBase64) : Promise.resolve(null),
   ]);
 
-  const parts: any[] = [
-    {
-      inlineData: {
-        mimeType: "image/png",
-        data: cleanImage,
-      },
-    },
-  ];
+  const refMeta = mimeAndBase64FromDataUrl(imageBase64);
+  const refMime = refMeta?.mimeType ?? "image/png";
+  const maskMeta = maskBase64 ? mimeAndBase64FromDataUrl(maskBase64) : null;
+  const maskMime = maskMeta?.mimeType ?? "image/png";
+
+  const userPrompt = prompt.replace(/"""+/g, '"').trim();
+
+  let parts: any[];
 
   if (cleanMask) {
-    parts.push({
-      inlineData: {
-        mimeType: "image/png",
-        data: cleanMask,
+    // Text MUST come first so the model binds this request to the following images (order was image-first before, which hurt prompt adherence on repeat edits).
+    parts = [
+      {
+        text: `PRIMARY EDIT REQUEST — apply exactly this change in this single generation (ignore any unrelated prior hypothetical edits):
+"""${userPrompt}"""
+
+The next two parts are images in order:
+(1) REFERENCE PHOTO — full current scene to edit.
+(2) MASK — white ≈ where the change should focus; black ≈ keep original pixels (except soft blends at edges). The brush is a hint, not a strict crop.
+
+Return ONE full-frame image that fulfills PRIMARY EDIT REQUEST, integrated naturally in the whole photograph (lighting, perspective, scale). No text or watermarks.`,
       },
-    });
-    parts.push({
-      text: `INPAINTING TASK:
-      Image 1 is the reference background.
-      Image 2 is the selection mask (White = where to add content, Black = original area).
-      
-      Task: Seamlessly integrate "${prompt}" into Image 1 within the white mask area.
-      
-      Requirements:
-      1. PERSPECTIVE: Align the object's 3D perspective with the street and buildings in Image 1.
-      2. LIGHTING: Match the sun direction, color temperature, and shadows from Image 1 exactly. Shadows must be sharp if the original scene lighting is harsh.
-      3. ZERO BACKGROUND OVERHEAD: The area inside the white mask that isn't the object must remain identical to the background of Image 1. Absolute pixel-level consistency for the surrounding pixels is required.
-      4. CONTAINMENT: Every part of "${prompt}" must be contained within the white pixels.
-      5. SHARP DEFINITION: Avoid any atmospheric blur or soft-glow at the edges. The object should look like a high-resolution, sharp photograph.
-      6. NO TEXT: Absolutely no text, labels, or watermarks.
-      
-      Return the full modified Image 1.`,
-    });
+      {
+        inlineData: {
+          mimeType: refMime,
+          data: cleanImage,
+        },
+      },
+      {
+        inlineData: {
+          mimeType: maskMime,
+          data: cleanMask,
+        },
+      },
+    ];
   } else {
-    parts.push({
-      text: `Transform this image based on: ${prompt}. 
+    parts = [
+      {
+        inlineData: {
+          mimeType: refMime,
+          data: cleanImage,
+        },
+      },
+      {
+        text: `Transform this image based on: ${userPrompt}. 
       Maintain the original scene structure and especially the buildings. Do NOT change any architecture unless explicitly told to.
       CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
-    });
+      },
+    ];
   }
 
   return callWithRetry(async () => {
@@ -240,8 +261,10 @@ export const transformImage = async (
 
     const response = await ai.models.generateContent({
       model,
-      contents: { parts },
+      contents: { role: "user", parts },
       config: {
+        responseModalities: [Modality.IMAGE],
+        ...(cleanMask ? { temperature: 0.35 as const } : {}),
         imageConfig: {
           aspectRatio,
           imageSize: highQuality ? "1K" : undefined,

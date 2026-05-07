@@ -7,9 +7,8 @@ interface BeforeAfterSliderProps {
   className?: string;
 }
 
-/** Same contain logic as InpaintCanvas.getStageSize — image fits inside container, no crop. */
-/** Scale image to fit inside the container (full image visible, max possible size). */
-function getContainedStageSize(
+/** Same cover logic as InpaintCanvas — image fills container; overflow cropped center. */
+function getCoverStageSize(
   cw: number,
   ch: number,
   iw: number,
@@ -18,7 +17,7 @@ function getContainedStageSize(
   if (!cw || !ch || !iw || !ih) {
     return { width: 0, height: 0 };
   }
-  const scale = Math.min(cw / iw, ch / ih);
+  const scale = Math.max(cw / iw, ch / ih);
   return { width: iw * scale, height: ih * scale };
 }
 
@@ -57,7 +56,7 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
     img.src = modifiedImage;
   }, [modifiedImage]);
 
-  const stage = getContainedStageSize(
+  const stage = getCoverStageSize(
     containerSize.width,
     containerSize.height,
     imageSize.width,
@@ -114,14 +113,12 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
         style={{
           width: stage.width ? `${stage.width}px` : '100%',
           height: stage.height ? `${stage.height}px` : '100%',
-          maxWidth: '100%',
-          maxHeight: '100%',
         }}
       >
         <img
           src={modifiedImage}
           alt="After"
-          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
           draggable={false}
         />
 
@@ -132,7 +129,7 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
           <img
             src={originalImage}
             alt="Before"
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
             draggable={false}
           />
           <div className="absolute top-4 left-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none">
