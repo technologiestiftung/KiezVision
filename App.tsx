@@ -33,6 +33,8 @@ const EXAMPLE_LIBRARY = [
   { id: 'ex1', dataUrl: 'https://images.unsplash.com/photo-1560930950-5cc20e80e392?auto=format&fit=crop&w=1200&q=80', prompt: '[Mapillary] Berlin Mitte: Alexanderplatz approach', timestamp: Date.now() },
 ];
 
+const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -494,7 +496,7 @@ export default function App() {
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <button onClick={() => navigate('/')} className="bg-white p-0 h-10 w-10 flex items-center justify-center border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
-              <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
               <h1 className="text-2xl font-black tracking-tighter leading-none mb-1">KiezVision</h1>
@@ -614,7 +616,7 @@ export default function App() {
         {view === 'home' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-6 text-center max-w-5xl mx-auto overflow-y-auto">
             <div className="w-24 h-24 bg-white flex items-center justify-center mb-6 border-4 border-black shadow-[8px_8px_0px_0px_rgba(255,178,193,1)] rotate-3 overflow-hidden">
-              <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </div>
             <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter leading-[0.9]">{t.reimagine}<br/>{t.yourStreet}</h2>
             <p className="text-black/60 mb-6 max-w-2xl text-lg font-bold tracking-tight">{t.subtitle}</p>
