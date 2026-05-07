@@ -13,7 +13,19 @@ import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
 import { transformImage } from './services/geminiService';
 import { geocodeBerlin, fetchMapillaryImage } from './services/mapillaryService';
-import { GeneratedImage, ProcessingState } from './types';
+import {
+  isFileSystemAccessSupported,
+  getRootHandleSilently,
+  getRootHandleWithPrompt,
+  chooseRootDirectory,
+  saveImageToLibrary,
+  loadThumbnailObjectUrl,
+  loadFullImageDataUrl,
+  deleteEntryFiles,
+  getLibraryFolderStatus,
+  type LibraryFolderStatus,
+} from './services/libraryStorage';
+import { GeneratedImage, LibraryEntry, ProcessingState } from './types';
 
 declare global {
   interface Window {
@@ -71,12 +83,25 @@ export default function App() {
       library: "Library",
       backToHome: "Back to Home",
       imageLibrary: "Image Library",
+      featuredStreets: "Featured Berlin Streets",
+      startTransformation: "Start Transformation",
       imageGallery: "Image Gallery",
       editThisImage: "Edit this image",
-      featuredStreets: "Featured Berlin Streets",
       yourSavedVisions: "Your Saved Visions",
+      libraryEmptyTitle: "No saved visions yet",
+      libraryEmptySubtitle: "Transform a Berlin street in the editor and hit Save to add your first vision here.",
+      libraryEmptyCta: "Start a new vision",
+      libraryFolderConnected: "Library folder connected",
+      libraryFolderDisconnected: "No library folder yet",
+      libraryFolderNeedsPermission: "Library folder needs to be reconnected",
+      reconnectLibraryFolder: "Reconnect Folder",
+      reconnectBannerTitle: "Reconnect your library folder",
+      reconnectBannerSubtitle: "Browsers ask for permission again after a refresh. One click brings your saved visions back.",
+      chooseLibraryFolder: "Choose Library Folder",
+      changeLibraryFolder: "Change Folder",
+      folderUnavailable: "Saved file not found on disk. The folder may have moved or the file was deleted.",
+      browserUnsupportedFolder: "Saving to a folder requires a Chromium browser (Chrome, Edge, Brave, Arc).",
       openInEditor: "Open in Editor",
-      startTransformation: "Start Transformation",
       compare: "Compare",
       areaEdit: "Area Edit",
       save: "Save",
@@ -114,12 +139,25 @@ export default function App() {
       library: "Galerie",
       backToHome: "Zurück zum Start",
       imageLibrary: "Bildgalerie",
+      featuredStreets: "Ausgewählte Berliner Straßen",
+      startTransformation: "Transformation starten",
       imageGallery: "Bildergalerie",
       editThisImage: "Dieses Bild bearbeiten",
-      featuredStreets: "Ausgewählte Berliner Straßen",
       yourSavedVisions: "Ihre gespeicherten Visionen",
+      libraryEmptyTitle: "Noch keine gespeicherten Visionen",
+      libraryEmptySubtitle: "Transformiere eine Berliner Straße im Editor und klicke auf Speichern, um deine erste Vision hier abzulegen.",
+      libraryEmptyCta: "Neue Vision starten",
+      libraryFolderConnected: "Galerie-Ordner verbunden",
+      libraryFolderDisconnected: "Noch kein Galerie-Ordner",
+      libraryFolderNeedsPermission: "Galerie-Ordner muss erneut verbunden werden",
+      reconnectLibraryFolder: "Ordner erneut verbinden",
+      reconnectBannerTitle: "Galerie-Ordner erneut verbinden",
+      reconnectBannerSubtitle: "Browser fragen nach einem Reload erneut nach der Berechtigung. Ein Klick stellt deine gespeicherten Visionen wieder her.",
+      chooseLibraryFolder: "Galerie-Ordner wählen",
+      changeLibraryFolder: "Ordner ändern",
+      folderUnavailable: "Datei auf der Festplatte nicht gefunden. Der Ordner wurde verschoben oder die Datei gelöscht.",
+      browserUnsupportedFolder: "Speichern in einem Ordner erfordert einen Chromium-Browser (Chrome, Edge, Brave, Arc).",
       openInEditor: "Im Editor öffnen",
-      startTransformation: "Transformation starten",
       compare: "Vergleichen",
       areaEdit: "Bereich bearbeiten",
       save: "Speichern",
@@ -145,10 +183,29 @@ export default function App() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
-  const [library, setLibrary] = useState<GeneratedImage[]>(() => {
+  const [library, setLibrary] = useState<LibraryEntry[]>(() => {
     const saved = localStorage.getItem('kiezvision_library');
-    return saved ? JSON.parse(saved) : EXAMPLE_LIBRARY;
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved) as Array<Partial<LibraryEntry> & { id?: string; dataUrl?: string }>;
+      return parsed
+        .filter((item) => !item.id?.startsWith('ex'))
+        .map((item): LibraryEntry => ({
+          id: item.id ?? `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+          prompt: item.prompt ?? 'Saved Image',
+          timestamp: item.timestamp ?? Date.now(),
+          folder: item.folder ?? '',
+          filename: item.filename ?? '',
+          thumbFilename: item.thumbFilename ?? '',
+          dataUrl: item.dataUrl,
+        }));
+    } catch {
+      return [];
+    }
   });
+  const [folderStatus, setFolderStatus] = useState<LibraryFolderStatus>('none');
+  const [thumbCache, setThumbCache] = useState<Record<string, string>>({});
+  const thumbLoadStatusRef = useRef<Record<string, 'loading' | 'done' | 'failed'>>({});
   const [uploadedGallery, setUploadedGallery] = useState<GeneratedImage[]>([]);
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false });
@@ -283,8 +340,68 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem('kiezvision_library', JSON.stringify(library));
+    try {
+      localStorage.setItem('kiezvision_library', JSON.stringify(library));
+    } catch (err) {
+      // Swallow errors here so an exception inside this effect can't tear down
+      // the React tree. With on-disk storage the metadata is tiny, so this
+      // path is effectively unreachable; kept as a defensive net.
+      console.warn('Failed to persist library to localStorage:', err);
+    }
   }, [library]);
+
+  // On mount, detect the persisted library folder status without prompting.
+  // We don't auto-prompt; the user re-grants permission via the "Reconnect"
+  // banner / button (browsers require a user gesture for that).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const status = await getLibraryFolderStatus();
+      if (!cancelled) setFolderStatus(status);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // When a folder becomes connected again, retry any thumbnails that failed
+  // earlier (e.g. before reconnect, or while permission was off). We also
+  // clear entries stuck in 'loading' from a previously-cancelled run; only
+  // 'done' entries are preserved so successful thumbnails aren't re-fetched.
+  useEffect(() => {
+    if (folderStatus !== 'connected') return;
+    const statusMap = thumbLoadStatusRef.current;
+    for (const id of Object.keys(statusMap)) {
+      if (statusMap[id] !== 'done') delete statusMap[id];
+    }
+  }, [folderStatus]);
+
+  // Lazily resolve thumbnails for visible saved-vision cards. Each entry is
+  // attempted at most once per attempt-window (tracked in a ref) so failed
+  // loads don't retry forever and successful loads aren't re-fetched.
+  useEffect(() => {
+    let cancelled = false;
+    const statusMap = thumbLoadStatusRef.current;
+    (async () => {
+      for (const item of library) {
+        if (item.id.startsWith('ex')) continue;
+        if (cancelled) return;
+        if (statusMap[item.id]) continue;
+        statusMap[item.id] = 'loading';
+        const url = await loadThumbnailObjectUrl(item);
+        if (cancelled) return;
+        if (url) {
+          statusMap[item.id] = 'done';
+          setThumbCache((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: url }));
+        } else {
+          statusMap[item.id] = 'failed';
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [library, folderStatus]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -348,20 +465,112 @@ export default function App() {
     }
   };
 
-  const handleSaveToLibrary = () => {
+  const ensureLibraryFolder = useCallback(async (): Promise<boolean> => {
+    if (!isFileSystemAccessSupported()) {
+      setError(
+        language === 'en'
+          ? 'Saving to a library folder requires a Chromium-based browser (Chrome, Edge, Brave, Arc).'
+          : 'Das Speichern in einen Ordner erfordert einen Chromium-basierten Browser (Chrome, Edge, Brave, Arc).'
+      );
+      return false;
+    }
+    const silent = await getRootHandleSilently();
+    if (silent) {
+      setFolderStatus('connected');
+      return true;
+    }
+    const reauth = await getRootHandleWithPrompt();
+    if (reauth) {
+      setFolderStatus('connected');
+      return true;
+    }
+    const picked = await chooseRootDirectory();
+    if (picked) {
+      setFolderStatus('connected');
+      return true;
+    }
+    return false;
+  }, [language]);
+
+  const handleChooseLibraryFolder = useCallback(async () => {
+    setError(null);
+    try {
+      const picked = await chooseRootDirectory();
+      if (picked) {
+        setFolderStatus('connected');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Could not select folder.');
+    }
+  }, []);
+
+  const handleReconnectLibraryFolder = useCallback(async () => {
+    setError(null);
+    try {
+      const handle = await getRootHandleWithPrompt();
+      if (handle) {
+        setFolderStatus('connected');
+      } else {
+        setError(
+          language === 'en'
+            ? 'Folder access was not granted. Try again or pick a different folder.'
+            : 'Zugriff auf den Ordner wurde nicht erteilt. Versuche es erneut oder wähle einen anderen Ordner.'
+        );
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Could not reconnect folder.');
+    }
+  }, [language]);
+
+  const handleSaveToLibrary = async () => {
     if (!currentImage) return;
-    const newEntry: GeneratedImage = {
-      id: Date.now().toString(),
-      dataUrl: currentImage,
-      prompt: history[0]?.prompt || 'Saved Image',
-      timestamp: Date.now()
-    };
-    setLibrary(prev => [newEntry, ...prev]);
-    alert("Saved to your library!");
+    setError(null);
+    try {
+      const ready = await ensureLibraryFolder();
+      if (!ready) return;
+      const ts = Date.now();
+      const { entry } = await saveImageToLibrary({
+        dataUrl: currentImage,
+        prompt: history[0]?.prompt || 'Saved Image',
+        timestamp: ts,
+      });
+      setLibrary((prev) => [entry, ...prev]);
+      alert(language === 'en' ? 'Saved to your library!' : 'In Ihrer Galerie gespeichert!');
+    } catch (err: any) {
+      if (err?.message === 'NO_LIBRARY_FOLDER') {
+        setError(
+          language === 'en'
+            ? 'Pick a library folder first to save your visions on disk.'
+            : 'Bitte zuerst einen Galerie-Ordner auswählen, um Visionen auf der Festplatte zu speichern.'
+        );
+        return;
+      }
+      console.error('Save to library failed:', err);
+      setError(
+        language === 'en'
+          ? 'Could not save to library. Please try again.'
+          : 'Speichern in der Galerie fehlgeschlagen. Bitte erneut versuchen.'
+      );
+    }
   };
 
-  const removeFromLibrary = (id: string) => {
-    setLibrary(prev => prev.filter(item => item.id !== id));
+  const removeFromLibrary = async (id: string) => {
+    const target = library.find((item) => item.id === id);
+    setLibrary((prev) => prev.filter((item) => item.id !== id));
+    setThumbCache((prev) => {
+      const url = prev[id];
+      if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (target) {
+      try {
+        await deleteEntryFiles(target);
+      } catch (err) {
+        console.warn('Failed to delete files on disk:', err);
+      }
+    }
   };
 
   const handleSearch = async (query: string) => {
@@ -840,13 +1049,58 @@ export default function App() {
 
         {view === 'library' && (
           <div className="max-w-7xl mx-auto p-12">
-            <div className="flex items-center justify-between mb-16 border-b-4 border-eb-900 pb-8">
+            <div className="flex flex-wrap items-end justify-between gap-6 mb-16 border-b-4 border-eb-900 pb-8">
               <div>
                 <button onClick={() => navigate('/')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
                   <ArrowLeft className="w-4 h-4" /> {t.backToHome}
                 </button>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
               </div>
+              {folderStatus === 'unsupported' ? (
+                <div className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-white text-eb-900 text-[10px] font-black max-w-md">
+                  <AlertCircle className="w-4 h-4" /> {t.browserUnsupportedFolder}
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex items-center gap-2 px-4 h-10 border-2 border-eb-900 text-[10px] font-black ${
+                      folderStatus === 'connected'
+                        ? 'bg-coral-100 text-eb-900'
+                        : folderStatus === 'needs-permission'
+                          ? 'bg-yellow-100 text-eb-900'
+                          : 'bg-white text-eb-900'
+                    }`}
+                  >
+                    {folderStatus === 'needs-permission' ? (
+                      <AlertCircle className="w-4 h-4" />
+                    ) : (
+                      <FolderOpen className="w-4 h-4" />
+                    )}
+                    {folderStatus === 'connected'
+                      ? t.libraryFolderConnected
+                      : folderStatus === 'needs-permission'
+                        ? t.libraryFolderNeedsPermission
+                        : t.libraryFolderDisconnected}
+                  </div>
+                  {folderStatus === 'needs-permission' ? (
+                    <button
+                      onClick={handleReconnectLibraryFolder}
+                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      {t.reconnectLibraryFolder}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleChooseLibraryFolder}
+                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      {folderStatus === 'connected' ? t.changeLibraryFolder : t.chooseLibraryFolder}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Featured Section */}
@@ -888,8 +1142,64 @@ export default function App() {
               </div>
             </div>
 
+            {/* Reconnect prompt — shown when a folder was previously picked
+                but the browser dropped permission (typical after a reload). */}
+            {folderStatus === 'needs-permission' && (
+              <div className="mb-10 bg-yellow-100 border-4 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(254,68,65,1)] flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center border-2 border-eb-900 bg-coral-100">
+                    <AlertCircle className="w-5 h-5 text-eb-900" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black tracking-tighter mb-1">{t.reconnectBannerTitle}</h3>
+                    <p className="text-xs font-bold text-eb-900/70 leading-relaxed">{t.reconnectBannerSubtitle}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleReconnectLibraryFolder}
+                  className="flex-shrink-0 inline-flex items-center gap-2 bg-eb-900 text-eb-50 px-6 h-12 border-2 border-eb-900 text-xs font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                >
+                  <FolderOpen className="w-4 h-4" /> {t.reconnectLibraryFolder}
+                </button>
+              </div>
+            )}
+
             {/* User Saved Section */}
-            {library.filter(item => !item.id.startsWith('ex')).length > 0 && (
+            {library.filter(item => !item.id.startsWith('ex')).length === 0 ? (
+              <div className="bg-white border-4 border-eb-900 p-12 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] text-center">
+                <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center border-2 border-eb-900 bg-coral-100">
+                  <Library className="w-8 h-8 text-eb-900" />
+                </div>
+                <h3 className="text-3xl font-black tracking-tighter mb-3">{t.libraryEmptyTitle}</h3>
+                <p className="text-sm font-bold text-eb-900/70 max-w-xl mx-auto mb-8 leading-relaxed">
+                  {t.libraryEmptySubtitle}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  {folderStatus === 'none' && (
+                    <button
+                      onClick={handleChooseLibraryFolder}
+                      className="inline-flex items-center gap-3 bg-white text-eb-900 px-8 h-14 border-2 border-eb-900 text-xs font-black shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" /> {t.chooseLibraryFolder}
+                    </button>
+                  )}
+                  {folderStatus === 'needs-permission' && (
+                    <button
+                      onClick={handleReconnectLibraryFolder}
+                      className="inline-flex items-center gap-3 bg-white text-eb-900 px-8 h-14 border-2 border-eb-900 text-xs font-black shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" /> {t.reconnectLibraryFolder}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate('/')}
+                    className="inline-flex items-center gap-3 bg-eb-900 text-eb-50 px-8 h-14 border-2 border-eb-900 text-xs font-black shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                  >
+                    <Wand2 className="w-4 h-4" /> {t.libraryEmptyCta}
+                  </button>
+                </div>
+              </div>
+            ) : (
               <div>
                 <div className="flex items-center gap-4 mb-10">
                   <div className="bg-tsb text-eb-50 px-4 py-2 text-sm font-black">
@@ -898,36 +1208,97 @@ export default function App() {
                   <div className="h-0.5 flex-1 bg-eb-900/10" />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
-                  {library.filter(item => !item.id.startsWith('ex')).map((item) => (
-                    <div key={item.id} className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] hover:shadow-none transition-all">
-                      <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
-                        <img src={item.dataUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={item.prompt} />
-                      </div>
-                      <div className="p-8">
-                        <p className="text-[10px] font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
-                        <div className="flex items-center gap-4">
-                          <button 
-                            onClick={() => {
-                              setOriginalImage(item.dataUrl);
-                              setCurrentImage(item.dataUrl);
-                              setHistory([{ ...item, id: 'original' }]);
-                              navigate('/edit');
-                              setEditMode('comparison');
-                            }}
-                            className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all"
-                          >
-                            {t.openInEditor}
-                          </button>
-                          <button 
-                            onClick={() => removeFromLibrary(item.id)}
-                            className="h-14 w-14 flex items-center justify-center bg-red-600 text-eb-50 border-2 border-eb-900 hover:bg-eb-900 transition-all"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                  {library.filter(item => !item.id.startsWith('ex')).map((item) => {
+                    const thumb = thumbCache[item.id] ?? item.dataUrl ?? null;
+                    const openInEditor = async () => {
+                      setError(null);
+                      const full = await loadFullImageDataUrl(item, { prompt: true });
+                      if (!full) {
+                        setError(t.folderUnavailable);
+                        return;
+                      }
+                      setFolderStatus('connected');
+                      setOriginalImage(full);
+                      setCurrentImage(full);
+                      setHistory([{ id: 'original', dataUrl: full, prompt: item.prompt, timestamp: item.timestamp }]);
+                      setEditMode('comparison');
+                      navigate('/edit');
+                    };
+                    const handleDownload = async () => {
+                      setError(null);
+                      const full = await loadFullImageDataUrl(item, { prompt: true });
+                      if (!full) {
+                        setError(t.folderUnavailable);
+                        return;
+                      }
+                      setFolderStatus('connected');
+                      const date = new Date(item.timestamp).toISOString().split('T')[0];
+                      const slug = (item.prompt || 'KiezVision').replace(/[^a-z0-9]/gi, '_').slice(0, 60) || 'KiezVision';
+                      const filename = `KiezVision_${date}_${slug}.png`;
+                      const a = document.createElement('a');
+                      a.href = full;
+                      a.download = filename;
+                      a.click();
+                    };
+                    return (
+                      <div
+                        key={item.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => { void openInEditor(); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            void openInEditor();
+                          }
+                        }}
+                        className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] hover:shadow-none transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-coral-500/40"
+                        title={language === 'en' ? 'Open in Editor' : 'Im Editor öffnen'}
+                      >
+                        <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
+                          {thumb ? (
+                            <img src={thumb} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={item.prompt} />
+                          ) : (
+                            <div className="w-full h-full bg-gray-100 animate-pulse" />
+                          )}
+                        </div>
+                        <div className="p-8">
+                          <p className="text-[10px] font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
+                          <div className="flex items-center gap-4">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openInEditor();
+                              }}
+                              className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all flex items-center justify-center gap-2"
+                            >
+                              <Wand2 className="w-4 h-4" /> {t.openInEditor}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleDownload();
+                              }}
+                              className="h-14 w-14 flex items-center justify-center bg-eb-900 text-eb-50 border-2 border-eb-900 hover:bg-coral-100 hover:text-eb-900 transition-all"
+                              title={language === 'en' ? 'Download' : 'Herunterladen'}
+                            >
+                              <Download className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void removeFromLibrary(item.id);
+                              }}
+                              className="h-14 w-14 flex items-center justify-center bg-red-600 text-eb-50 border-2 border-eb-900 hover:bg-eb-900 transition-all"
+                              title={language === 'en' ? 'Delete' : 'Löschen'}
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1177,7 +1548,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={closeCamera}
-                className="px-8 h-14 border-2 border-eb-50 bg-transparent text-eb-50 text-sm font-black hover:bg-eb-50/10 transition-all"
+                className="px-8 h-14 border-2 border-eb-900 bg-eb-50 text-eb-900 text-sm font-black shadow-[4px_4px_0px_0px_rgba(254,68,65,0.4)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] hover:bg-coral-100 transition-all"
               >
                 {t.cancelCamera}
               </button>
