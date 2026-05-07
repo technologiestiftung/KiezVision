@@ -3,10 +3,16 @@ import { Trees, Droplets, Ban, Sun } from 'lucide-react';
 import { TransformationType } from '../types';
 
 interface QuickActionsProps {
-  onAction: (prompt: string) => void;
+  onAction: (prompt: string) => void | Promise<void>;
   disabled: boolean;
   language?: 'en' | 'de';
 }
+
+const swallowAsync = (p: Promise<void> | void) => {
+  if (p && typeof (p as Promise<void>).catch === 'function') {
+    void (p as Promise<void>).catch(() => {});
+  }
+};
 
 export const QuickActions: React.FC<QuickActionsProps> = ({ onAction, disabled, language = 'en' }) => {
   const t = {
@@ -29,25 +35,25 @@ export const QuickActions: React.FC<QuickActionsProps> = ({ onAction, disabled, 
       <ActionBtn
         icon={<Sun className="w-8 h-8 text-amber-400 fill-amber-400/20" />}
         label={t.sunny}
-        onClick={() => onAction(TransformationType.SUNNY_DAY)}
+        onClick={() => swallowAsync(onAction(TransformationType.SUNNY_DAY))}
         disabled={disabled}
       />
       <ActionBtn
         icon={<Trees className="w-8 h-8 text-emerald-500 fill-emerald-500/20" />}
         label={t.nature}
-        onClick={() => onAction(TransformationType.ADD_TREES)}
+        onClick={() => swallowAsync(onAction(TransformationType.ADD_TREES))}
         disabled={disabled}
       />
       <ActionBtn
         icon={<Droplets className="w-8 h-8 text-sky-500 fill-sky-500/20" />}
         label={t.water}
-        onClick={() => onAction(TransformationType.ADD_WATER)}
+        onClick={() => swallowAsync(onAction(TransformationType.ADD_WATER))}
         disabled={disabled}
       />
       <ActionBtn
         icon={<Ban className="w-8 h-8 text-red-500" />}
         label={t.noCars}
-        onClick={() => onAction(TransformationType.REMOVE_CARS)}
+        onClick={() => swallowAsync(onAction(TransformationType.REMOVE_CARS))}
         disabled={disabled}
       />
     </div>

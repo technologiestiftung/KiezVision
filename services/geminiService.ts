@@ -1,15 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality, type GenerateContentResponse, type Part } from "@google/genai";
 
 const getAiClient = () => {
   // Priority: 1. API_KEY (from selection dialog), 2. CUSTOM_GEMINI_API_KEY (from secrets), 3. GEMINI_API_KEY (default)
-  const apiKey =
-    process.env.API_KEY ||
-    process.env.CUSTOM_GEMINI_API_KEY ||
-    process.env.GEMINI_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error(
-      "Gemini API Key not found. Please ensure an API key is provided.",
-    );
+    throw new Error("Gemini API Key not found. Please ensure an API key is provided.");
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -17,27 +12,21 @@ const getAiClient = () => {
 /**
  * Helper to call Gemini with exponential backoff for 429 errors
  */
-const callWithRetry = async <T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-): Promise<T> => {
+const callWithRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error: any) {
       lastError = error;
-      const isQuotaError =
-        error.message?.includes("429") ||
-        error.status === "RESOURCE_EXHAUSTED" ||
-        JSON.stringify(error).includes("429");
-
+      const isQuotaError = error.message?.includes("429") || 
+                          error.status === "RESOURCE_EXHAUSTED" ||
+                          JSON.stringify(error).includes("429");
+      
       if (isQuotaError && i < maxRetries - 1) {
         const delay = Math.pow(2, i) * 2000 + Math.random() * 1000;
-        console.warn(
-          `Quota exceeded (429). Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        console.warn(`Quota exceeded (429). Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
       throw error;
@@ -49,48 +38,101 @@ const callWithRetry = async <T>(
 /**
  * Helper to ensure an image is in base64 format for the Gemini API.
  */
-const ensureBase64 = async (imageInput: string): Promise<string> => {
-  if (imageInput.startsWith("data:")) {
-    return imageInput.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+/** MIME + raw base64 (no data: prefix) for API inlineData */
+const ensureBase64 = async (imageInput: string): Promise<{ mimeType: string; base64: string }> => {
+  if (imageInput.startsWith('data:')) {
+    const m = imageInput.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (m) {
+      let mime = m[1].toLowerCase();
+      if (mime === 'image/jpg') mime = 'image/jpeg';
+      return { mimeType: mime, base64: m[2] };
+    }
+    const stripped = imageInput.replace(/^data:image\/[\w.+~-]+;base64,/i, '');
+    return { mimeType: 'image/jpeg', base64: stripped };
   }
 
-  // If it's a URL, fetch it and convert to base64
   try {
     const response = await fetch(imageInput);
     const blob = await response.blob();
-    return new Promise((resolve, reject) => {
+    const mimeType = blob.type && blob.type.startsWith('image/')
+      ? blob.type
+      : 'image/jpeg';
+    return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        resolve(base64);
+        const dataUrl = reader.result as string;
+        const m = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (m) {
+          resolve({ mimeType: m[1], base64: m[2] });
+        } else {
+          reject(new Error('Unexpected data URL format from blob'));
+        }
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
   } catch (error) {
     console.error("Failed to convert image to base64:", error);
-    // Return original and hope it works (might still be a base64 string without prefix)
-    return imageInput;
+    return { mimeType: 'image/jpeg', base64: imageInput };
   }
 };
+
+function extractInlineImageDataUrl(response: GenerateContentResponse): string {
+  const feedback = response.promptFeedback;
+  if (feedback?.blockReason) {
+    const msg =
+      typeof feedback.blockReasonMessage === 'string'
+        ? feedback.blockReasonMessage
+        : '';
+    throw new Error(
+      msg || `Prompt was blocked (${String(feedback.blockReason)}).`
+    );
+  }
+
+  const candidates = response.candidates ?? [];
+  const textPieces: string[] = [];
+
+  for (const cand of candidates) {
+    const fr = cand.finishReason;
+    if (fr === 'SAFETY' || fr === 'BLOCKLIST' || fr === 'PROHIBITED_CONTENT') {
+      throw new Error(
+        `Transformation blocked (${fr}). Try a shorter or different prompt.`
+      );
+    }
+    const parts = cand.content?.parts ?? [];
+    for (const part of parts) {
+      const id = part.inlineData;
+      if (id?.data) {
+        const mime = id.mimeType || 'image/png';
+        return `data:${mime};base64,${id.data}`;
+      }
+      if (part.text?.trim()) {
+        textPieces.push(part.text.trim());
+      }
+    }
+  }
+
+  const combined = textPieces.join('\n').trim();
+  if (combined.length > 0) {
+    throw new Error(
+      `No image in the reply (model returned text only): ${combined.slice(0, 280)}`
+    );
+  }
+
+  throw new Error('No image was returned from the transformation.');
+}
 
 /**
  * Uses Gemini 2.5 Flash to get grounded descriptive details about a location.
  */
-export const getGroundedPrompt = async (
-  prompt: string,
-  highQuality = true,
-): Promise<string> => {
+export const getGroundedPrompt = async (prompt: string, highQuality = true): Promise<string> => {
   if (!highQuality) return prompt;
 
   return callWithRetry(async () => {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: {
-        parts: [
-          {
-            text: `Search for current Google Street View images and visual details of "${prompt}" in Berlin. 
+      contents: { parts: [{ text: `Search for current Google Street View images and visual details of "${prompt}" in Berlin. 
       Provide a highly detailed, photorealistic visual description for an AI image generator. 
       CRITICAL CONSTRAINTS:
       1. STYLE: Must look exactly like a Google Street View capture.
@@ -98,16 +140,13 @@ export const getGroundedPrompt = async (
       3. ATMOSPHERE: Clear daylight, neutral colors, realistic urban lighting.
       4. NO TEXT: Absolutely NO text, labels, watermarks, street signs names, or signatures in the description.
       Focus on architecture, street furniture, foliage, and atmosphere. 
-      Output ONLY the description.`,
-          },
-        ],
-      },
+      Output ONLY the description.` }] },
       config: {
         tools: [{ googleSearch: {} }],
       },
     });
     return response.text || prompt;
-  }).catch((error) => {
+  }).catch(error => {
     console.warn("Search grounding failed:", error);
     return prompt;
   });
@@ -116,34 +155,30 @@ export const getGroundedPrompt = async (
 /**
  * Generates a new image from scratch using the flash image model.
  */
-export const generateImage = async (
-  prompt: string,
-  highQuality = true,
-): Promise<string> => {
+export const generateImage = async (prompt: string, highQuality = true): Promise<string> => {
   // Get grounded details first (only if high quality)
   const detailedPrompt = await getGroundedPrompt(prompt, highQuality);
 
   return callWithRetry(async () => {
     const ai = getAiClient();
-    const model = highQuality
-      ? "gemini-3.1-flash-image-preview"
-      : "gemini-2.5-flash-image";
-
-    const config: any = {
+    const model = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+    
+    const config: Record<string, unknown> = {
+      responseModalities: [Modality.IMAGE],
       imageConfig: {
         aspectRatio: "16:9",
+        ...(highQuality ? { imageSize: '1K' as const } : {}),
       },
     };
 
     if (highQuality) {
-      config.imageConfig.imageSize = "1K";
       config.tools = [
         {
           googleSearch: {
             searchTypes: {
               webSearch: {},
               imageSearch: {},
-            },
+            }
           },
         },
       ];
@@ -151,26 +186,12 @@ export const generateImage = async (
 
     const response = await ai.models.generateContent({
       model,
-      contents: {
-        parts: [
-          {
-            text: `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
-          },
-        ],
-      },
-      config: {
-        imageConfig: config.imageConfig,
-        tools: config.tools,
-      },
+      contents:
+        `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
+      config: config as never,
     });
 
-    const imagePart = response.candidates?.[0]?.content?.parts.find(
-      (p) => p.inlineData,
-    );
-    if (imagePart?.inlineData?.data) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-    throw new Error("The model did not return an image.");
+    return extractInlineImageDataUrl(response);
   });
 };
 
@@ -178,31 +199,31 @@ export const generateImage = async (
  * Transforms an existing image, optionally using a mask for inpainting or a sketch for visual guidance.
  */
 export const transformImage = async (
-  imageBase64: string,
-  prompt: string,
+  imageBase64: string, 
+  prompt: string, 
   maskBase64?: string | null,
   highQuality = true,
-  aspectRatio: "1:1" | "3:4" | "4:3" | "9:16" | "16:9" = "16:9",
+  aspectRatio: "1:1" | "3:4" | "4:3" | "9:16" | "16:9" = "16:9"
 ): Promise<string> => {
-  const [cleanImage, cleanMask] = await Promise.all([
+  const [imagePrepared, maskPrepared] = await Promise.all([
     ensureBase64(imageBase64),
     maskBase64 ? ensureBase64(maskBase64) : Promise.resolve(null),
   ]);
 
-  const parts: any[] = [
+  const parts: Part[] = [
     {
       inlineData: {
-        mimeType: "image/png",
-        data: cleanImage,
+        mimeType: imagePrepared.mimeType,
+        data: imagePrepared.base64,
       },
     },
   ];
 
-  if (cleanMask) {
+  if (maskPrepared) {
     parts.push({
       inlineData: {
-        mimeType: "image/png",
-        data: cleanMask,
+        mimeType: maskPrepared.mimeType,
+        data: maskPrepared.base64,
       },
     });
     parts.push({
@@ -233,28 +254,22 @@ export const transformImage = async (
   return callWithRetry(async () => {
     const ai = getAiClient();
     // For mask-based inpainting, gemini-3.1-flash-image-preview is usually much better at following complex constraints
-    const model =
-      cleanMask || highQuality
-        ? "gemini-3.1-flash-image-preview"
-        : "gemini-2.5-flash-image";
+    const model = (maskPrepared || highQuality) ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+
+    const imageConfig = {
+      aspectRatio,
+      ...(highQuality ? { imageSize: '1K' as const } : {}),
+    };
 
     const response = await ai.models.generateContent({
       model,
-      contents: { parts },
+      contents: { role: 'user', parts },
       config: {
-        imageConfig: {
-          aspectRatio,
-          imageSize: highQuality ? "1K" : undefined,
-        },
+        responseModalities: [Modality.IMAGE],
+        imageConfig,
       },
     });
 
-    const imagePart = response.candidates?.[0]?.content?.parts.find(
-      (p) => p.inlineData,
-    );
-    if (imagePart?.inlineData?.data) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-    throw new Error("No image was returned from the transformation.");
+    return extractInlineImageDataUrl(response);
   });
 };

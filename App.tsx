@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
@@ -12,7 +13,19 @@ import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
 import { transformImage } from './services/geminiService';
 import { geocodeBerlin, fetchMapillaryImage } from './services/mapillaryService';
-import { GeneratedImage, ProcessingState } from './types';
+import {
+  isFileSystemAccessSupported,
+  getRootHandleSilently,
+  getRootHandleWithPrompt,
+  chooseRootDirectory,
+  saveImageToLibrary,
+  loadThumbnailObjectUrl,
+  loadFullImageDataUrl,
+  deleteEntryFiles,
+  getLibraryFolderStatus,
+  type LibraryFolderStatus,
+} from './services/libraryStorage';
+import { GeneratedImage, LibraryEntry, ProcessingState } from './types';
 
 declare global {
   interface Window {
@@ -28,12 +41,25 @@ const BERLIN_DISTRICTS = [
   "Neukölln", "Charlottenburg", "Schöneberg", "Wedding", "Moabit", "Tempelhof"
 ];
 
-const EXAMPLE_LIBRARY = [
-  { id: 'ex1', dataUrl: 'https://images.unsplash.com/photo-1560930950-5cc20e80e392?auto=format&fit=crop&w=1200&q=80', prompt: '[Mapillary] Berlin Mitte: Alexanderplatz approach', timestamp: Date.now() },
-];
+const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
 
 export default function App() {
-  const [view, setView] = useState<'home' | 'editor' | 'library' | 'image-gallery'>('home');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const normalizePath = (pathname: string) => {
+    // Backwards-compat with the requested (typo) route.
+    if (pathname === '/libray') return '/library';
+    return pathname;
+  };
+
+  const normalizedPath = normalizePath(location.pathname);
+  const view: 'home' | 'editor' | 'library' | 'image-gallery' =
+    normalizedPath === '/edit' ? 'editor' :
+    normalizedPath === '/library' ? 'library' :
+    normalizedPath === '/image-gallery' ? 'image-gallery' :
+    'home';
+
   const [language, setLanguage] = useState<'en' | 'de'>('en');
 
   const t = {
@@ -53,12 +79,28 @@ export default function App() {
       library: "Library",
       backToHome: "Back to Home",
       imageLibrary: "Image Library",
+      startTransformation: "Start Transformation",
       imageGallery: "Image Gallery",
       editThisImage: "Edit this image",
-      featuredStreets: "Featured Berlin Streets",
       yourSavedVisions: "Your Saved Visions",
+      libraryEmptyTitle: "No saved visions yet",
+      libraryEmptySubtitle: "Transform a Berlin street in the editor and hit Save to add your first vision here.",
+      libraryEmptyCta: "Start a new vision",
+      dateToday: "Today",
+      dateYesterday: "Yesterday",
+      visionsCount: "visions",
+      visionCountSingular: "vision",
+      libraryFolderConnected: "Library folder connected",
+      libraryFolderDisconnected: "No library folder yet",
+      libraryFolderNeedsPermission: "Library folder needs to be reconnected",
+      reconnectLibraryFolder: "Reconnect Folder",
+      reconnectBannerTitle: "Reconnect your library folder",
+      reconnectBannerSubtitle: "Browsers ask for permission again after a refresh. One click brings your saved visions back.",
+      chooseLibraryFolder: "Choose Library Folder",
+      changeLibraryFolder: "Change Folder",
+      folderUnavailable: "Saved file not found on disk. The folder may have moved or the file was deleted.",
+      browserUnsupportedFolder: "Saving to a folder requires a Chromium browser (Chrome, Edge, Brave, Arc).",
       openInEditor: "Open in Editor",
-      startTransformation: "Start Transformation",
       compare: "Compare",
       areaEdit: "Area Edit",
       save: "Save",
@@ -96,12 +138,28 @@ export default function App() {
       library: "Galerie",
       backToHome: "Zurück zum Start",
       imageLibrary: "Bildgalerie",
+      startTransformation: "Transformation starten",
       imageGallery: "Bildergalerie",
       editThisImage: "Dieses Bild bearbeiten",
-      featuredStreets: "Ausgewählte Berliner Straßen",
       yourSavedVisions: "Ihre gespeicherten Visionen",
+      libraryEmptyTitle: "Noch keine gespeicherten Visionen",
+      libraryEmptySubtitle: "Transformiere eine Berliner Straße im Editor und klicke auf Speichern, um deine erste Vision hier abzulegen.",
+      libraryEmptyCta: "Neue Vision starten",
+      dateToday: "Heute",
+      dateYesterday: "Gestern",
+      visionsCount: "Visionen",
+      visionCountSingular: "Vision",
+      libraryFolderConnected: "Galerie-Ordner verbunden",
+      libraryFolderDisconnected: "Noch kein Galerie-Ordner",
+      libraryFolderNeedsPermission: "Galerie-Ordner muss erneut verbunden werden",
+      reconnectLibraryFolder: "Ordner erneut verbinden",
+      reconnectBannerTitle: "Galerie-Ordner erneut verbinden",
+      reconnectBannerSubtitle: "Browser fragen nach einem Reload erneut nach der Berechtigung. Ein Klick stellt deine gespeicherten Visionen wieder her.",
+      chooseLibraryFolder: "Galerie-Ordner wählen",
+      changeLibraryFolder: "Ordner ändern",
+      folderUnavailable: "Datei auf der Festplatte nicht gefunden. Der Ordner wurde verschoben oder die Datei gelöscht.",
+      browserUnsupportedFolder: "Speichern in einem Ordner erfordert einen Chromium-Browser (Chrome, Edge, Brave, Arc).",
       openInEditor: "Im Editor öffnen",
-      startTransformation: "Transformation starten",
       compare: "Vergleichen",
       areaEdit: "Bereich bearbeiten",
       save: "Speichern",
@@ -127,10 +185,89 @@ export default function App() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
-  const [library, setLibrary] = useState<GeneratedImage[]>(() => {
+  const [library, setLibrary] = useState<LibraryEntry[]>(() => {
     const saved = localStorage.getItem('kiezvision_library');
-    return saved ? JSON.parse(saved) : EXAMPLE_LIBRARY;
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved) as Array<Partial<LibraryEntry> & { id?: string; dataUrl?: string }>;
+      return parsed
+        .filter((item) => !item.id?.startsWith('ex'))
+        .map((item): LibraryEntry => ({
+          id: item.id ?? `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+          prompt: item.prompt ?? 'Saved Image',
+          timestamp: item.timestamp ?? Date.now(),
+          folder: item.folder ?? '',
+          filename: item.filename ?? '',
+          thumbFilename: item.thumbFilename ?? '',
+          dataUrl: item.dataUrl,
+        }));
+    } catch {
+      return [];
+    }
   });
+  const [folderStatus, setFolderStatus] = useState<LibraryFolderStatus>('none');
+  const [thumbCache, setThumbCache] = useState<Record<string, string>>({});
+  const thumbLoadStatusRef = useRef<Record<string, 'loading' | 'done' | 'failed'>>({});
+
+  // Returns the YYYY-MM-DD bucket an entry belongs to. New entries already
+  // have a `folder` field that matches; legacy entries (saved before the
+  // on-disk library existed) get derived from their timestamp.
+  const entryDateKey = useCallback((entry: LibraryEntry): string => {
+    if (entry.folder) return entry.folder;
+    const d = new Date(entry.timestamp);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
+
+  // Saved visions grouped by date, most recent first; entries within a group
+  // are also sorted newest-first.
+  const libraryByDate = useMemo<Array<[string, LibraryEntry[]]>>(() => {
+    const groups = new Map<string, LibraryEntry[]>();
+    for (const item of library) {
+      if (item.id.startsWith('ex')) continue;
+      const key = entryDateKey(item);
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(item);
+      else groups.set(key, [item]);
+    }
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => b.timestamp - a.timestamp);
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0));
+  }, [library, entryDateKey]);
+
+  const formatDateHeader = useCallback(
+    (dateKey: string): string => {
+      const today = new Date();
+      const todayKey = (() => {
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      })();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayKey = (() => {
+        const yyyy = yesterday.getFullYear();
+        const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+        const dd = String(yesterday.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      })();
+      if (dateKey === todayKey) return t.dateToday;
+      if (dateKey === yesterdayKey) return t.dateYesterday;
+      const [yyyy, mm, dd] = dateKey.split('-').map(Number);
+      if (!yyyy || !mm || !dd) return dateKey;
+      const date = new Date(yyyy, mm - 1, dd);
+      return date.toLocaleDateString(language === 'en' ? 'en-US' : 'de-DE', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    },
+    [language, t.dateToday, t.dateYesterday]
+  );
   const [uploadedGallery, setUploadedGallery] = useState<GeneratedImage[]>([]);
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false });
@@ -153,35 +290,6 @@ export default function App() {
   const cameraFileFallbackRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
 
-  const setRoute = useCallback((nextView: typeof view) => {
-    const nextPath =
-      nextView === 'image-gallery'
-        ? '/image-gallery'
-        : nextView === 'library'
-          ? '/library'
-          : nextView === 'editor'
-            ? '/editor'
-            : '/';
-
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, '', nextPath);
-    }
-    setView(nextView);
-  }, []);
-
-  useEffect(() => {
-    const syncFromPath = () => {
-      const path = window.location.pathname || '/';
-      if (path === '/image-gallery') setView('image-gallery');
-      else if (path === '/library') setView('library');
-      else if (path === '/editor') setView('editor');
-      else setView('home');
-    };
-    syncFromPath();
-    window.addEventListener('popstate', syncFromPath);
-    return () => window.removeEventListener('popstate', syncFromPath);
-  }, []);
-
   const stopCameraStream = useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
@@ -197,9 +305,9 @@ export default function App() {
       setError(null);
       setHistory([{ id: 'original', dataUrl, prompt, timestamp: Date.now() }]);
       setEditMode('comparison');
-      setRoute('editor');
+      navigate('/edit');
     },
-    [setRoute]
+    [navigate]
   );
 
   useEffect(() => {
@@ -276,6 +384,16 @@ export default function App() {
     checkKey();
   }, []);
 
+  useEffect(() => {
+    if (location.pathname !== normalizedPath) {
+      navigate(normalizedPath, { replace: true });
+      return;
+    }
+    if (!['/', '/library', '/edit', '/image-gallery'].includes(normalizedPath)) {
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, navigate, normalizedPath]);
+
   const handleSelectKey = async () => {
     if (window.aistudio) {
       await window.aistudio.openSelectKey();
@@ -284,8 +402,68 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem('kiezvision_library', JSON.stringify(library));
+    try {
+      localStorage.setItem('kiezvision_library', JSON.stringify(library));
+    } catch (err) {
+      // Swallow errors here so an exception inside this effect can't tear down
+      // the React tree. With on-disk storage the metadata is tiny, so this
+      // path is effectively unreachable; kept as a defensive net.
+      console.warn('Failed to persist library to localStorage:', err);
+    }
   }, [library]);
+
+  // On mount, detect the persisted library folder status without prompting.
+  // We don't auto-prompt; the user re-grants permission via the "Reconnect"
+  // banner / button (browsers require a user gesture for that).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const status = await getLibraryFolderStatus();
+      if (!cancelled) setFolderStatus(status);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // When a folder becomes connected again, retry any thumbnails that failed
+  // earlier (e.g. before reconnect, or while permission was off). We also
+  // clear entries stuck in 'loading' from a previously-cancelled run; only
+  // 'done' entries are preserved so successful thumbnails aren't re-fetched.
+  useEffect(() => {
+    if (folderStatus !== 'connected') return;
+    const statusMap = thumbLoadStatusRef.current;
+    for (const id of Object.keys(statusMap)) {
+      if (statusMap[id] !== 'done') delete statusMap[id];
+    }
+  }, [folderStatus]);
+
+  // Lazily resolve thumbnails for visible saved-vision cards. Each entry is
+  // attempted at most once per attempt-window (tracked in a ref) so failed
+  // loads don't retry forever and successful loads aren't re-fetched.
+  useEffect(() => {
+    let cancelled = false;
+    const statusMap = thumbLoadStatusRef.current;
+    (async () => {
+      for (const item of library) {
+        if (item.id.startsWith('ex')) continue;
+        if (cancelled) return;
+        if (statusMap[item.id]) continue;
+        statusMap[item.id] = 'loading';
+        const url = await loadThumbnailObjectUrl(item);
+        if (cancelled) return;
+        if (url) {
+          statusMap[item.id] = 'done';
+          setThumbCache((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: url }));
+        } else {
+          statusMap[item.id] = 'failed';
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [library, folderStatus]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -340,7 +518,7 @@ export default function App() {
 
       setUploadedGallery(entries);
       setSelectedGalleryId(entries[0]?.id ?? null);
-      setRoute('image-gallery');
+      navigate('/image-gallery');
     } catch (err: any) {
       setError(err?.message || 'Failed to process folder upload.');
     } finally {
@@ -349,20 +527,112 @@ export default function App() {
     }
   };
 
-  const handleSaveToLibrary = () => {
+  const ensureLibraryFolder = useCallback(async (): Promise<boolean> => {
+    if (!isFileSystemAccessSupported()) {
+      setError(
+        language === 'en'
+          ? 'Saving to a library folder requires a Chromium-based browser (Chrome, Edge, Brave, Arc).'
+          : 'Das Speichern in einen Ordner erfordert einen Chromium-basierten Browser (Chrome, Edge, Brave, Arc).'
+      );
+      return false;
+    }
+    const silent = await getRootHandleSilently();
+    if (silent) {
+      setFolderStatus('connected');
+      return true;
+    }
+    const reauth = await getRootHandleWithPrompt();
+    if (reauth) {
+      setFolderStatus('connected');
+      return true;
+    }
+    const picked = await chooseRootDirectory();
+    if (picked) {
+      setFolderStatus('connected');
+      return true;
+    }
+    return false;
+  }, [language]);
+
+  const handleChooseLibraryFolder = useCallback(async () => {
+    setError(null);
+    try {
+      const picked = await chooseRootDirectory();
+      if (picked) {
+        setFolderStatus('connected');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Could not select folder.');
+    }
+  }, []);
+
+  const handleReconnectLibraryFolder = useCallback(async () => {
+    setError(null);
+    try {
+      const handle = await getRootHandleWithPrompt();
+      if (handle) {
+        setFolderStatus('connected');
+      } else {
+        setError(
+          language === 'en'
+            ? 'Folder access was not granted. Try again or pick a different folder.'
+            : 'Zugriff auf den Ordner wurde nicht erteilt. Versuche es erneut oder wähle einen anderen Ordner.'
+        );
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Could not reconnect folder.');
+    }
+  }, [language]);
+
+  const handleSaveToLibrary = async () => {
     if (!currentImage) return;
-    const newEntry: GeneratedImage = {
-      id: Date.now().toString(),
-      dataUrl: currentImage,
-      prompt: history[0]?.prompt || 'Saved Image',
-      timestamp: Date.now()
-    };
-    setLibrary(prev => [newEntry, ...prev]);
-    alert("Saved to your library!");
+    setError(null);
+    try {
+      const ready = await ensureLibraryFolder();
+      if (!ready) return;
+      const ts = Date.now();
+      const { entry } = await saveImageToLibrary({
+        dataUrl: currentImage,
+        prompt: history[0]?.prompt || 'Saved Image',
+        timestamp: ts,
+      });
+      setLibrary((prev) => [entry, ...prev]);
+      alert(language === 'en' ? 'Saved to your library!' : 'In Ihrer Galerie gespeichert!');
+    } catch (err: any) {
+      if (err?.message === 'NO_LIBRARY_FOLDER') {
+        setError(
+          language === 'en'
+            ? 'Pick a library folder first to save your visions on disk.'
+            : 'Bitte zuerst einen Galerie-Ordner auswählen, um Visionen auf der Festplatte zu speichern.'
+        );
+        return;
+      }
+      console.error('Save to library failed:', err);
+      setError(
+        language === 'en'
+          ? 'Could not save to library. Please try again.'
+          : 'Speichern in der Galerie fehlgeschlagen. Bitte erneut versuchen.'
+      );
+    }
   };
 
-  const removeFromLibrary = (id: string) => {
-    setLibrary(prev => prev.filter(item => item.id !== id));
+  const removeFromLibrary = async (id: string) => {
+    const target = library.find((item) => item.id === id);
+    setLibrary((prev) => prev.filter((item) => item.id !== id));
+    setThumbCache((prev) => {
+      const url = prev[id];
+      if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (target) {
+      try {
+        await deleteEntryFiles(target);
+      } catch (err) {
+        console.warn('Failed to delete files on disk:', err);
+      }
+    }
   };
 
   const handleSearch = async (query: string) => {
@@ -417,7 +687,7 @@ export default function App() {
       setMapillaryMetadata(mMeta);
       setHistory([{ id: Date.now().toString(), dataUrl: imageData, prompt: `${source}: ${displayLocation}`, timestamp: Date.now() }]);
       setEditMode('comparison');
-      setView('editor');
+      navigate('/edit');
     } catch (err: any) {
       const isQuotaError = err.message?.toLowerCase().includes("429") || 
                            err.message?.toLowerCase().includes("quota") || 
@@ -608,6 +878,7 @@ export default function App() {
       } else {
         setError(err.message || "Failed to transform image");
       }
+      throw err instanceof Error ? err : new Error(String(err));
     } finally {
       setProcessing({ isProcessing: false });
     }
@@ -628,8 +899,8 @@ export default function App() {
       <header className="border-b-2 border-eb-900 bg-tsb sticky top-0 z-50">
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => setRoute('home')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
-              <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
+            <button onClick={() => navigate('/')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
               <h1 className="text-2xl font-black tracking-tighter leading-none mb-1 text-eb-50">KiezVision</h1>
@@ -658,7 +929,7 @@ export default function App() {
 
           <div className="flex items-center gap-4 h-10">
             <button 
-              onClick={() => setRoute('library')}
+              onClick={() => navigate('/library')}
               className={`flex items-center gap-2 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === 'library' ? 'bg-eb-900 text-eb-50' : 'bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]'}`}
             >
               <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
@@ -749,7 +1020,7 @@ export default function App() {
         {view === 'home' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-6 text-center max-w-5xl mx-auto overflow-y-auto">
             <div className="w-24 h-24 bg-white flex items-center justify-center mb-6 border-4 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] rotate-3 overflow-hidden">
-              <img src="/src/assets/images/kiezvision_logo_1777989140951.png" className="w-full h-full object-cover" alt="KiezVision Logo" />
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </div>
             <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter leading-[0.9]">{t.reimagine}<br/>{t.yourStreet}</h2>
             <p className="text-eb-900/60 mb-6 max-w-2xl text-lg font-bold tracking-tight">{t.subtitle}</p>
@@ -840,56 +1111,118 @@ export default function App() {
 
         {view === 'library' && (
           <div className="max-w-7xl mx-auto p-12">
-            <div className="flex items-center justify-between mb-16 border-b-4 border-eb-900 pb-8">
+            <div className="flex flex-wrap items-end justify-between gap-6 mb-16 border-b-4 border-eb-900 pb-8">
               <div>
-                <button onClick={() => setRoute('home')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
+                <button onClick={() => navigate('/')} className="flex items-center gap-2 text-eb-900 font-black mb-4 border-2 border-eb-900 px-4 h-10 bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all">
                   <ArrowLeft className="w-4 h-4" /> {t.backToHome}
                 </button>
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
               </div>
+              {folderStatus === 'unsupported' ? (
+                <div className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-white text-eb-900 text-[10px] font-black max-w-md">
+                  <AlertCircle className="w-4 h-4" /> {t.browserUnsupportedFolder}
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex items-center gap-2 px-4 h-10 border-2 border-eb-900 text-[10px] font-black ${
+                      folderStatus === 'connected'
+                        ? 'bg-coral-100 text-eb-900'
+                        : folderStatus === 'needs-permission'
+                          ? 'bg-yellow-100 text-eb-900'
+                          : 'bg-white text-eb-900'
+                    }`}
+                  >
+                    {folderStatus === 'needs-permission' ? (
+                      <AlertCircle className="w-4 h-4" />
+                    ) : (
+                      <FolderOpen className="w-4 h-4" />
+                    )}
+                    {folderStatus === 'connected'
+                      ? t.libraryFolderConnected
+                      : folderStatus === 'needs-permission'
+                        ? t.libraryFolderNeedsPermission
+                        : t.libraryFolderDisconnected}
+                  </div>
+                  {folderStatus === 'needs-permission' ? (
+                    <button
+                      onClick={handleReconnectLibraryFolder}
+                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      {t.reconnectLibraryFolder}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleChooseLibraryFolder}
+                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      {folderStatus === 'connected' ? t.changeLibraryFolder : t.chooseLibraryFolder}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Featured Section */}
-            <div className="mb-20">
-              <div className="flex items-center gap-4 mb-10">
-                <div className="bg-tsb text-eb-50 px-4 py-2 text-sm font-black">
-                  {t.featuredStreets}
-                </div>
-                <div className="h-0.5 flex-1 bg-eb-900/10" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
-                {EXAMPLE_LIBRARY.map((item) => (
-                  <div key={item.id} className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] hover:shadow-none transition-all">
-                    <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
-                      <img src={item.dataUrl} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" alt={item.prompt} />
-                    </div>
-                    <div className="p-8">
-                      <p className="text-[10px] font-black text-eb-900 mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
-                      <button 
-                        onClick={() => {
-                          setProcessing({ isProcessing: true, statusMessage: t.loading });
-                          setTimeout(() => {
-                            setOriginalImage(item.dataUrl);
-                            setCurrentImage(item.dataUrl);
-                            setHistory([{ ...item, id: 'original' }]);
-                            setRoute('editor');
-                            setEditMode('comparison');
-                            setImageSource(t.sourceMapillary);
-                            setProcessing({ isProcessing: false });
-                          }, 500);
-                        }}
-                        className="w-full bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-500 transition-all flex items-center justify-center gap-3"
-                      >
-                        <Wand2 className="w-5 h-5" /> {t.startTransformation}
-                      </button>
-                    </div>
+            {/* Reconnect prompt — shown when a folder was previously picked
+                but the browser dropped permission (typical after a reload). */}
+            {folderStatus === 'needs-permission' && (
+              <div className="mb-10 bg-yellow-100 border-4 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center border-2 border-eb-900 bg-coral-100">
+                    <AlertCircle className="w-5 h-5 text-eb-900" />
                   </div>
-                ))}
+                  <div>
+                    <h3 className="text-lg font-black tracking-tighter mb-1">{t.reconnectBannerTitle}</h3>
+                    <p className="text-xs font-bold text-eb-900/70 leading-relaxed">{t.reconnectBannerSubtitle}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleReconnectLibraryFolder}
+                  className="flex-shrink-0 inline-flex items-center gap-2 bg-eb-900 text-eb-50 px-6 h-12 border-2 border-eb-900 text-xs font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                >
+                  <FolderOpen className="w-4 h-4" /> {t.reconnectLibraryFolder}
+                </button>
               </div>
-            </div>
+            )}
 
             {/* User Saved Section */}
-            {library.filter(item => !item.id.startsWith('ex')).length > 0 && (
+            {library.filter(item => !item.id.startsWith('ex')).length === 0 ? (
+              <div className="bg-white border-4 border-eb-900 p-12 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] text-center">
+                <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center border-2 border-eb-900 bg-coral-100">
+                  <Library className="w-8 h-8 text-eb-900" />
+                </div>
+                <h3 className="text-3xl font-black tracking-tighter mb-3">{t.libraryEmptyTitle}</h3>
+                <p className="text-sm font-bold text-eb-900/70 max-w-xl mx-auto mb-8 leading-relaxed">
+                  {t.libraryEmptySubtitle}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  {folderStatus === 'none' && (
+                    <button
+                      onClick={handleChooseLibraryFolder}
+                      className="inline-flex items-center gap-3 bg-white text-eb-900 px-8 h-14 border-2 border-eb-900 text-xs font-black shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" /> {t.chooseLibraryFolder}
+                    </button>
+                  )}
+                  {folderStatus === 'needs-permission' && (
+                    <button
+                      onClick={handleReconnectLibraryFolder}
+                      className="inline-flex items-center gap-3 bg-white text-eb-900 px-8 h-14 border-2 border-eb-900 text-xs font-black shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                    >
+                      <FolderOpen className="w-4 h-4" /> {t.reconnectLibraryFolder}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate('/')}
+                    className="inline-flex items-center gap-3 bg-eb-900 text-eb-50 px-8 h-14 border-2 border-eb-900 text-xs font-black shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                  >
+                    <Wand2 className="w-4 h-4" /> {t.libraryEmptyCta}
+                  </button>
+                </div>
+              </div>
+            ) : (
               <div>
                 <div className="flex items-center gap-4 mb-10">
                   <div className="bg-tsb text-eb-50 px-4 py-2 text-sm font-black">
@@ -897,38 +1230,112 @@ export default function App() {
                   </div>
                   <div className="h-0.5 flex-1 bg-eb-900/10" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
-                  {library.filter(item => !item.id.startsWith('ex')).map((item) => (
-                    <div key={item.id} className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] hover:shadow-none transition-all">
-                      <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
-                        <img src={item.dataUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={item.prompt} />
+                {libraryByDate.map(([dateKey, entries]) => (
+                  <div key={dateKey} className="mb-16 last:mb-0">
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="border-2 border-eb-900 bg-white px-4 py-2 text-xs font-black tracking-tight">
+                        {formatDateHeader(dateKey)}
                       </div>
-                      <div className="p-8">
-                        <p className="text-[10px] font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
-                        <div className="flex items-center gap-4">
-                          <button 
-                            onClick={() => {
-                              setOriginalImage(item.dataUrl);
-                              setCurrentImage(item.dataUrl);
-                              setHistory([{ ...item, id: 'original' }]);
-                              setRoute('editor');
-                              setEditMode('comparison');
-                            }}
-                            className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all"
-                          >
-                            {t.openInEditor}
-                          </button>
-                          <button 
-                            onClick={() => removeFromLibrary(item.id)}
-                            className="h-14 w-14 flex items-center justify-center bg-red-600 text-eb-50 border-2 border-eb-900 hover:bg-eb-900 transition-all"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                      <div className="text-[10px] font-black text-eb-900/40 uppercase tracking-widest">
+                        {entries.length} {entries.length === 1 ? t.visionCountSingular : t.visionsCount}
+                      </div>
+                      <div className="h-0.5 flex-1 bg-eb-900/10" />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
+                      {entries.map((item) => {
+                    const thumb = thumbCache[item.id] ?? item.dataUrl ?? null;
+                    const openInEditor = async () => {
+                      setError(null);
+                      const full = await loadFullImageDataUrl(item, { prompt: true });
+                      if (!full) {
+                        setError(t.folderUnavailable);
+                        return;
+                      }
+                      setFolderStatus('connected');
+                      setOriginalImage(full);
+                      setCurrentImage(full);
+                      setHistory([{ id: 'original', dataUrl: full, prompt: item.prompt, timestamp: item.timestamp }]);
+                      setEditMode('comparison');
+                      navigate('/edit');
+                    };
+                    const handleDownload = async () => {
+                      setError(null);
+                      const full = await loadFullImageDataUrl(item, { prompt: true });
+                      if (!full) {
+                        setError(t.folderUnavailable);
+                        return;
+                      }
+                      setFolderStatus('connected');
+                      const date = new Date(item.timestamp).toISOString().split('T')[0];
+                      const slug = (item.prompt || 'KiezVision').replace(/[^a-z0-9]/gi, '_').slice(0, 60) || 'KiezVision';
+                      const filename = `KiezVision_${date}_${slug}.png`;
+                      const a = document.createElement('a');
+                      a.href = full;
+                      a.download = filename;
+                      a.click();
+                    };
+                    return (
+                      <div
+                        key={item.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => { void openInEditor(); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            void openInEditor();
+                          }
+                        }}
+                        className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] hover:shadow-none transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-coral-500/40"
+                        title={language === 'en' ? 'Open in Editor' : 'Im Editor öffnen'}
+                      >
+                        <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
+                          {thumb ? (
+                            <img src={thumb} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={item.prompt} />
+                          ) : (
+                            <div className="w-full h-full bg-gray-100 animate-pulse" />
+                          )}
+                        </div>
+                        <div className="p-8">
+                          <p className="text-[10px] font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
+                          <div className="flex items-center gap-4">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openInEditor();
+                              }}
+                              className="flex-1 bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-100 hover:text-eb-900 transition-all flex items-center justify-center gap-2"
+                            >
+                              <Wand2 className="w-4 h-4" /> {t.openInEditor}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleDownload();
+                              }}
+                              className="h-14 w-14 flex items-center justify-center bg-eb-900 text-eb-50 border-2 border-eb-900 hover:bg-coral-100 hover:text-eb-900 transition-all"
+                              title={language === 'en' ? 'Download' : 'Herunterladen'}
+                            >
+                              <Download className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void removeFromLibrary(item.id);
+                              }}
+                              className="h-14 w-14 flex items-center justify-center bg-red-600 text-eb-50 border-2 border-eb-900 hover:bg-eb-900 transition-all"
+                              title={language === 'en' ? 'Delete' : 'Löschen'}
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
+                    );
+                  })}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1177,7 +1584,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={closeCamera}
-                className="px-8 h-14 border-2 border-eb-50 bg-transparent text-eb-50 text-sm font-black hover:bg-eb-50/10 transition-all"
+                className="px-8 h-14 border-2 border-eb-900 bg-eb-50 text-eb-900 text-sm font-black shadow-[4px_4px_0px_0px_rgba(254,68,65,0.4)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] hover:bg-coral-100 transition-all"
               >
                 {t.cancelCamera}
               </button>
