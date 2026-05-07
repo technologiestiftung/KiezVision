@@ -41,10 +41,6 @@ const BERLIN_DISTRICTS = [
   "Neukölln", "Charlottenburg", "Schöneberg", "Wedding", "Moabit", "Tempelhof"
 ];
 
-const EXAMPLE_LIBRARY = [
-  { id: 'ex1', dataUrl: 'https://images.unsplash.com/photo-1560930950-5cc20e80e392?auto=format&fit=crop&w=1200&q=80', prompt: '[Mapillary] Berlin Mitte: Alexanderplatz approach', timestamp: Date.now() },
-];
-
 const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
 
 export default function App() {
@@ -83,7 +79,6 @@ export default function App() {
       library: "Library",
       backToHome: "Back to Home",
       imageLibrary: "Image Library",
-      featuredStreets: "Featured Berlin Streets",
       startTransformation: "Start Transformation",
       imageGallery: "Image Gallery",
       editThisImage: "Edit this image",
@@ -143,7 +138,6 @@ export default function App() {
       library: "Galerie",
       backToHome: "Zurück zum Start",
       imageLibrary: "Bildgalerie",
-      featuredStreets: "Ausgewählte Berliner Straßen",
       startTransformation: "Transformation starten",
       imageGallery: "Bildergalerie",
       editThisImage: "Dieses Bild bearbeiten",
@@ -1171,49 +1165,10 @@ export default function App() {
               )}
             </div>
 
-            {/* Featured Section */}
-            <div className="mb-20">
-              <div className="flex items-center gap-4 mb-10">
-                <div className="bg-tsb text-eb-50 px-4 py-2 text-sm font-black">
-                  {t.featuredStreets}
-                </div>
-                <div className="h-0.5 flex-1 bg-eb-900/10" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
-                {EXAMPLE_LIBRARY.map((item) => (
-                  <div key={item.id} className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] hover:shadow-none transition-all">
-                    <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
-                      <img src={item.dataUrl} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" alt={item.prompt} />
-                    </div>
-                    <div className="p-8">
-                      <p className="text-[10px] font-black text-eb-900 mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
-                      <button 
-                        onClick={() => {
-                          setProcessing({ isProcessing: true, statusMessage: t.loading });
-                          setTimeout(() => {
-                            setOriginalImage(item.dataUrl);
-                            setCurrentImage(item.dataUrl);
-                            setHistory([{ ...item, id: 'original' }]);
-                            navigate('/edit');
-                            setEditMode('comparison');
-                            setImageSource(t.sourceMapillary);
-                            setProcessing({ isProcessing: false });
-                          }, 500);
-                        }}
-                        className="w-full bg-eb-900 text-eb-50 h-14 text-xs font-black hover:bg-coral-500 transition-all flex items-center justify-center gap-3"
-                      >
-                        <Wand2 className="w-5 h-5" /> {t.startTransformation}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
             {/* Reconnect prompt — shown when a folder was previously picked
                 but the browser dropped permission (typical after a reload). */}
             {folderStatus === 'needs-permission' && (
-              <div className="mb-10 bg-yellow-100 border-4 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(254,68,65,1)] flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
+              <div className="mb-10 bg-yellow-100 border-4 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
                 <div className="flex items-start gap-4">
                   <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center border-2 border-eb-900 bg-coral-100">
                     <AlertCircle className="w-5 h-5 text-eb-900" />
@@ -1234,7 +1189,7 @@ export default function App() {
 
             {/* User Saved Section */}
             {library.filter(item => !item.id.startsWith('ex')).length === 0 ? (
-              <div className="bg-white border-4 border-eb-900 p-12 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] text-center">
+              <div className="bg-white border-4 border-eb-900 p-12 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] text-center">
                 <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center border-2 border-eb-900 bg-coral-100">
                   <Library className="w-8 h-8 text-eb-900" />
                 </div>
@@ -1331,7 +1286,7 @@ export default function App() {
                             void openInEditor();
                           }
                         }}
-                        className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(254,68,65,1)] hover:shadow-none transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-coral-500/40"
+                        className="group relative bg-white border-2 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)] hover:shadow-none transition-all cursor-pointer focus:outline-none focus:ring-4 focus:ring-coral-500/40"
                         title={language === 'en' ? 'Open in Editor' : 'Im Editor öffnen'}
                       >
                         <div className="aspect-[4/3] w-full border-b-2 border-eb-900 overflow-hidden bg-gray-100">
