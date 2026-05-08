@@ -12,7 +12,7 @@ import { InpaintCanvas } from './components/InpaintCanvas';
 import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
 import { transformImage } from './services/geminiService';
-import { geocodeBerlin, fetchMapillaryImage } from './services/mapillaryService';
+import { geocodeBerlin, fetchMapillaryImage, reverseGeocodeLocation } from './services/mapillaryService';
 import {
   isFileSystemAccessSupported,
   getRootHandleSilently,
@@ -90,7 +90,6 @@ export default function App() {
       yourStreet: "Your Street",
       searchPlaceholder: "Search for a street (e.g. Kurfürstendamm)...",
       autoDetect: "Auto Detect",
-      realPhotos: "Street Image",
       go: "GO",
       exploreDistricts: "Explore Districts",
       uploadPhoto: "Upload Photo",
@@ -133,6 +132,10 @@ export default function App() {
       placeholderMask: "Describe what to put in the selected area (e.g. 'add a tree', 'park bench')...",
       loading: "Loading from library...",
       fetchingStreet: "Fetching your street...",
+      detectingLocation: "Detecting your location...",
+      locationUnavailable: "Current location is not available in this browser.",
+      locationPermissionDenied: "Location permission was denied. Allow location access and try again.",
+      locationNotFound: "Could not identify a nearby street for your current location.",
       synthesizing: "Synthesizing...",
       iterations: "Model Iterations",
       sourceMapillary: "Mapillary Real Image",
@@ -149,7 +152,6 @@ export default function App() {
       yourStreet: "neu denken",
       searchPlaceholder: "Nach einer Straße suchen (z.B. Kurfürstendamm)...",
       autoDetect: "Auto-Erkennung",
-      realPhotos: "Straßenbild",
       go: "LOS",
       exploreDistricts: "Bezirke erkunden",
       uploadPhoto: "Foto hochladen",
@@ -184,6 +186,10 @@ export default function App() {
       areaEdit: "Bereich bearbeiten",
       save: "Speichern",
       fetchingStreet: "Suche deine Straße...",
+      detectingLocation: "Standort wird ermittelt...",
+      locationUnavailable: "Der aktuelle Standort ist in diesem Browser nicht verfügbar.",
+      locationPermissionDenied: "Standortberechtigung wurde abgelehnt. Erlaube den Standortzugriff und versuche es erneut.",
+      locationNotFound: "Es konnte keine nahegelegene Straße für deinen aktuellen Standort gefunden werden.",
       clearHistory: "Verlauf leeren",
       toolkit: "Transformations-Toolkit",
       size: "Größe",
@@ -293,7 +299,6 @@ export default function App() {
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false });
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<'auto' | 'real'>('auto');
   const [imageSource, setImageSource] = useState<string | null>(null);
   const [fetchedLocation, setFetchedLocation] = useState<string | null>(null);
   const [mapillaryMetadata, setMapillaryMetadata] = useState<{ link: string; capturedAt?: string } | null>(null);
@@ -694,6 +699,49 @@ export default function App() {
     }
   };
 
+  const getCurrentPosition = (): Promise<GeolocationPosition> => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('GEOLOCATION_UNSUPPORTED'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000,
+      });
+    });
+  };
+
+  const handleAutoDetect = async () => {
+    setError(null);
+    setProcessing({ isProcessing: true, statusMessage: t.detectingLocation });
+    try {
+      const position = await getCurrentPosition();
+      const detectedLocation = await reverseGeocodeLocation(
+        position.coords.latitude,
+        position.coords.longitude,
+        language
+      );
+
+      if (!detectedLocation?.displayName) {
+        throw new Error('LOCATION_NOT_FOUND');
+      }
+
+      setSearchQuery(detectedLocation.displayName);
+    } catch (err: any) {
+      if (err?.message === 'GEOLOCATION_UNSUPPORTED') {
+        setError(t.locationUnavailable);
+      } else if (err?.code === err?.PERMISSION_DENIED || err?.code === 1) {
+        setError(t.locationPermissionDenied);
+      } else {
+        setError(t.locationNotFound);
+      }
+    } finally {
+      setProcessing({ isProcessing: false });
+    }
+  };
+
   const handleSearch = async (query: string) => {
     if (!query.trim()) return;
     setSearchQuery(query);
@@ -1091,31 +1139,19 @@ export default function App() {
             <div className="w-full space-y-8">
               <div className="bg-white border-4 border-eb-900 p-6 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)]">
                 <div className="flex justify-center mb-4">
-                  <div className="flex items-center border-2 border-eb-900 bg-white overflow-hidden shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] h-10">
-                    <button
-                      type="button"
-                      onClick={() => setSearchMode('auto')}
-                      className={`px-4 h-full text-[10px] font-black transition-all ${
-                        searchMode === 'auto' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'
-                      }`}
-                    >
-                      {t.autoDetect}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSearchMode('real')}
-                      className={`px-4 h-full text-[10px] font-black transition-all border-l-2 border-eb-900 ${
-                        searchMode === 'real' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'
-                      }`}
-                    >
-                      {t.realPhotos}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAutoDetect}
+                    disabled={processing.isProcessing}
+                    className="px-4 h-10 text-[10px] font-black transition-all border-2 border-eb-900 bg-eb-900 text-eb-50 shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t.autoDetect}
+                  </button>
                 </div>
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
-                  <button type="submit" disabled={!searchQuery.trim() || processing.isProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all">{t.go}</button>
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 pr-28 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
+                  <button type="submit" disabled={!searchQuery.trim() || processing.isProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all disabled:opacity-50 disabled:cursor-not-allowed">{t.go}</button>
                 </form>
 
                 <div className="mt-6 pt-6 border-t-2 border-eb-900/10">
