@@ -14,6 +14,12 @@ export interface GeocodeResult {
   displayName: string;
 }
 
+export interface ReverseGeocodeResult {
+  displayName: string;
+  lat: number;
+  lng: number;
+}
+
 /**
  * Uses Gemini to resolve a street name/district in Berlin to coordinates.
  */
@@ -42,6 +48,48 @@ export const geocodeBerlin = async (query: string): Promise<GeocodeResult | null
     return JSON.parse(response.text);
   } catch (error) {
     console.error("Geocoding failed:", error);
+    return null;
+  }
+};
+
+/**
+ * Uses OpenStreetMap's reverse geocoder to turn browser coordinates into a
+ * street-level search label, including the house number when available.
+ */
+export const reverseGeocodeLocation = async (
+  lat: number,
+  lng: number,
+  language: 'en' | 'de' = 'en'
+): Promise<ReverseGeocodeResult | null> => {
+  try {
+    const params = new URLSearchParams({
+      format: 'jsonv2',
+      lat: String(lat),
+      lon: String(lng),
+      addressdetails: '1',
+      zoom: '18',
+      'accept-language': language,
+    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const address = data.address ?? {};
+    const street = address.road || address.pedestrian || address.footway || address.cycleway || address.path;
+    if (!street) return null;
+
+    const streetAddress = address.house_number ? `${street} ${address.house_number}` : street;
+    const area = address.neighbourhood || address.suburb || address.borough || address.city_district;
+    const city = address.city || address.town || address.village || address.state;
+    const context = area || city;
+
+    return {
+      displayName: context ? `${streetAddress}, ${context}` : streetAddress,
+      lat,
+      lng,
+    };
+  } catch (error) {
+    console.error("Reverse geocoding failed:", error);
     return null;
   }
 };

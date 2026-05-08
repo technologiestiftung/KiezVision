@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/citylab.png" />
+    <link rel="apple-touch-icon" href="/citylab.png" />
     <title>KiezVision</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -10,26 +12,55 @@
         theme: {
           extend: {
             colors: {
+              eb: {
+                50: '#FAFAF2',
+                900: '#20201B',
+              },
+              coral: {
+                100: '#FFCFD6',
+                500: '#FE4441',
+              },
+              tsb: '#1E3791',
+              kv: {
+                chrome: '#EDECE8',
+              },
               gray: {
                 750: '#2d3748',
                 850: '#1a202c',
                 950: '#0d1117',
               }
-            }
+            },
+            fontFamily: {
+              sans: ['"Host Grotesk"', 'system-ui', 'sans-serif'],
+              mono: ['"Host Grotesk"', 'ui-monospace', 'monospace'],
+            },
           }
         }
       }
     </script>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
     <style>
+      @font-face {
+        font-family: 'Host Grotesk';
+        src: url('/fonts/host-grotesk/HostGrotesk-VariableFont_wght.ttf') format('truetype');
+        font-weight: 300 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Host Grotesk';
+        src: url('/fonts/host-grotesk/HostGrotesk-Italic-VariableFont_wght.ttf') format('truetype');
+        font-weight: 300 900;
+        font-style: italic;
+        font-display: swap;
+      }
       body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f7f4ed;
-        color: #000000;
+        font-family: 'Host Grotesk', system-ui, sans-serif;
+        background-color: #FAFAF2;
+        color: #20201B;
         margin: 0;
       }
       .font-mono {
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Host Grotesk', ui-monospace, monospace;
       }
       /* Custom Brutalist scrollbar */
       ::-webkit-scrollbar {
@@ -37,12 +68,12 @@
         height: 12px;
       }
       ::-webkit-scrollbar-track {
-        background: #f7f4ed; 
-        border-left: 2px solid #000000;
+        background: #FAFAF2;
+        border-left: 2px solid #20201B;
       }
       ::-webkit-scrollbar-thumb {
-        background: #000000; 
-        border: 2px solid #f7f4ed;
+        background: #20201B;
+        border: 2px solid #FAFAF2;
       }
       
       @keyframes pixelate-in {
@@ -69,8 +100,8 @@
 
       .pixel-grid-layer {
         background-image: 
-          linear-gradient(to right, rgba(0,0,0,0.1) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(0,0,0,0.1) 1px, transparent 1px);
+          linear-gradient(to right, rgba(32,32,27,0.12) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(32,32,27,0.12) 1px, transparent 1px);
         background-size: 8px 8px;
       }
     </style>

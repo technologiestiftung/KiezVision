@@ -1,4 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
+import {
+  GoogleGenAI,
+  Modality,
+  type GenerateContentResponse,
+  type Part,
+} from "@google/genai";
 
 const getAiClient = () => {
   // Priority: 1. API_KEY (from selection dialog), 2. CUSTOM_GEMINI_API_KEY (from secrets), 3. GEMINI_API_KEY (default)
@@ -38,30 +43,100 @@ const callWithRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
 /**
  * Helper to ensure an image is in base64 format for the Gemini API.
  */
-const ensureBase64 = async (imageInput: string): Promise<string> => {
+/** MIME + raw base64 (no data: prefix) for API inlineData */
+const ensureBase64 = async (imageInput: string): Promise<{ mimeType: string; base64: string }> => {
   if (imageInput.startsWith('data:')) {
-    return imageInput.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
+    const m = imageInput.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (m) {
+      let mime = m[1].toLowerCase();
+      if (mime === 'image/jpg') mime = 'image/jpeg';
+      return { mimeType: mime, base64: m[2] };
+    }
+    const stripped = imageInput.replace(/^data:image\/[\w.+~-]+;base64,/i, '');
+    return { mimeType: 'image/jpeg', base64: stripped };
   }
-  
-  // If it's a URL, fetch it and convert to base64
+
   try {
     const response = await fetch(imageInput);
     const blob = await response.blob();
-    return new Promise((resolve, reject) => {
+    const mimeType = blob.type && blob.type.startsWith('image/')
+      ? blob.type
+      : 'image/jpeg';
+    return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = (reader.result as string).split(',')[1];
-        resolve(base64);
+        const dataUrl = reader.result as string;
+        const m = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (m) {
+          resolve({ mimeType: m[1], base64: m[2] });
+        } else {
+          reject(new Error('Unexpected data URL format from blob'));
+        }
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
   } catch (error) {
     console.error("Failed to convert image to base64:", error);
-    // Return original and hope it works (might still be a base64 string without prefix)
-    return imageInput;
+    return { mimeType: 'image/jpeg', base64: imageInput };
   }
 };
+
+/** Correct MIME + raw base64 from a data URL (Gemini is sensitive to PNG vs JPEG). */
+const mimeAndBase64FromDataUrl = (
+  imageInput: string,
+): { mimeType: string; base64: string } | null => {
+  const m = imageInput.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return null;
+  let mime = m[1].toLowerCase();
+  if (mime === "image/jpg") mime = "image/jpeg";
+  return { mimeType: mime, base64: m[2] };
+};
+
+function extractInlineImageDataUrl(response: GenerateContentResponse): string {
+  const feedback = response.promptFeedback;
+  if (feedback?.blockReason) {
+    const msg =
+      typeof feedback.blockReasonMessage === 'string'
+        ? feedback.blockReasonMessage
+        : '';
+    throw new Error(
+      msg || `Prompt was blocked (${String(feedback.blockReason)}).`
+    );
+  }
+
+  const candidates = response.candidates ?? [];
+  const textPieces: string[] = [];
+
+  for (const cand of candidates) {
+    const fr = cand.finishReason;
+    if (fr === 'SAFETY' || fr === 'BLOCKLIST' || fr === 'PROHIBITED_CONTENT') {
+      throw new Error(
+        `Transformation blocked (${fr}). Try a shorter or different prompt.`
+      );
+    }
+    const parts = cand.content?.parts ?? [];
+    for (const part of parts) {
+      const id = part.inlineData;
+      if (id?.data) {
+        const mime = id.mimeType || 'image/png';
+        return `data:${mime};base64,${id.data}`;
+      }
+      if (part.text?.trim()) {
+        textPieces.push(part.text.trim());
+      }
+    }
+  }
+
+  const combined = textPieces.join('\n').trim();
+  if (combined.length > 0) {
+    throw new Error(
+      `No image in the reply (model returned text only): ${combined.slice(0, 280)}`
+    );
+  }
+
+  throw new Error('No image was returned from the transformation.');
+}
 
 /**
  * Uses Gemini 2.5 Flash to get grounded descriptive details about a location.
@@ -104,14 +179,15 @@ export const generateImage = async (prompt: string, highQuality = true): Promise
     const ai = getAiClient();
     const model = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
     
-    const config: any = {
+    const config: Record<string, unknown> = {
+      responseModalities: [Modality.IMAGE],
       imageConfig: {
         aspectRatio: "16:9",
-      }
+        ...(highQuality ? { imageSize: '1K' as const } : {}),
+      },
     };
 
     if (highQuality) {
-      config.imageConfig.imageSize = "1K";
       config.tools = [
         {
           googleSearch: {
@@ -126,20 +202,12 @@ export const generateImage = async (prompt: string, highQuality = true): Promise
 
     const response = await ai.models.generateContent({
       model,
-      contents: {
-        parts: [{ text: `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.` }],
-      },
-      config: {
-        imageConfig: config.imageConfig,
-        tools: config.tools
-      }
+      contents:
+        `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
+      config: config as never,
     });
 
-    const imagePart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-    if (imagePart?.inlineData?.data) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-    throw new Error("The model did not return an image.");
+    return extractInlineImageDataUrl(response);
   });
 };
 
@@ -153,72 +221,84 @@ export const transformImage = async (
   highQuality = true,
   aspectRatio: "1:1" | "3:4" | "4:3" | "9:16" | "16:9" = "16:9"
 ): Promise<string> => {
-  const [cleanImage, cleanMask] = await Promise.all([
+  const [imagePrepared, maskPrepared] = await Promise.all([
     ensureBase64(imageBase64),
-    maskBase64 ? ensureBase64(maskBase64) : Promise.resolve(null)
+    maskBase64 ? ensureBase64(maskBase64) : Promise.resolve(null),
   ]);
-  
-  const parts: any[] = [
-    {
-      inlineData: {
-        mimeType: 'image/png',
-        data: cleanImage,
-      },
-    }
-  ];
 
-  if (cleanMask) {
-    parts.push({
-      inlineData: {
-        mimeType: 'image/png',
-        data: cleanMask,
-      }
-    });
-    parts.push({
-      text: `INPAINTING TASK:
-      Image 1 is the reference background.
-      Image 2 is the selection mask (White = where to add content, Black = original area).
-      
-      Task: Seamlessly integrate "${prompt}" into Image 1 within the white mask area.
-      
-      Requirements:
-      1. PERSPECTIVE: Align the object's 3D perspective with the street and buildings in Image 1.
-      2. LIGHTING: Match the sun direction, color temperature, and shadows from Image 1 exactly. Shadows must be sharp if the original scene lighting is harsh.
-      3. ZERO BACKGROUND OVERHEAD: The area inside the white mask that isn't the object must remain identical to the background of Image 1. Absolute pixel-level consistency for the surrounding pixels is required.
-      4. CONTAINMENT: Every part of "${prompt}" must be contained within the white pixels.
-      5. SHARP DEFINITION: Avoid any atmospheric blur or soft-glow at the edges. The object should look like a high-resolution, sharp photograph.
-      6. NO TEXT: Absolutely no text, labels, or watermarks.
-      
-      Return the full modified Image 1.`,
-    });
+  const refMeta = mimeAndBase64FromDataUrl(imageBase64);
+  const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
+  const maskMeta = maskBase64 ? mimeAndBase64FromDataUrl(maskBase64) : null;
+  const maskMime = maskMeta?.mimeType ?? maskPrepared?.mimeType ?? "image/png";
+
+  const userPrompt = prompt.replace(/"""+/g, '"').trim();
+
+  let parts: Part[];
+
+  if (maskPrepared) {
+    // Text MUST come first so the model binds this request to the following images.
+    parts = [
+      {
+        text: `PRIMARY EDIT REQUEST — apply exactly this change in this single generation (ignore any unrelated prior hypothetical edits):
+"""${userPrompt}"""
+
+The next two parts are images in order:
+(1) REFERENCE PHOTO — full current scene to edit.
+(2) MASK — white ≈ where the change should focus; black ≈ keep original pixels (except soft blends at edges). The brush is a hint, not a strict crop.
+
+Return ONE full-frame image that fulfills PRIMARY EDIT REQUEST, integrated naturally in the whole photograph (lighting, perspective, scale). No text or watermarks.`,
+      },
+      {
+        inlineData: {
+          mimeType: refMime,
+          data: imagePrepared.base64,
+        },
+      },
+      {
+        inlineData: {
+          mimeType: maskMime,
+          data: maskPrepared.base64,
+        },
+      },
+    ];
   } else {
-    parts.push({
-      text: `Transform this image based on: ${prompt}. 
+    parts = [
+      {
+        inlineData: {
+          mimeType: refMime,
+          data: imagePrepared.base64,
+        },
+      },
+      {
+        text: `Transform this image based on: ${userPrompt}. 
       Maintain the original scene structure and especially the buildings. Do NOT change any architecture unless explicitly told to.
       CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
-    });
+      },
+    ];
   }
 
   return callWithRetry(async () => {
     const ai = getAiClient();
-    // For mask-based inpainting, gemini-3.1-flash-image-preview is usually much better at following complex constraints
-    const model = (cleanMask || highQuality) ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
-    
+    const model =
+      maskPrepared || highQuality
+        ? 'gemini-3.1-flash-image-preview'
+        : 'gemini-2.5-flash-image';
+
+    const imageConfig = {
+      aspectRatio,
+      ...(highQuality ? { imageSize: '1K' as const } : {}),
+    };
+
     const response = await ai.models.generateContent({
       model,
-      contents: { parts },
+      contents: { role: 'user', parts },
       config: {
-        imageConfig: {
-          aspectRatio,
-          imageSize: highQuality ? "1K" : undefined
-        }
-      }
+        responseModalities: [Modality.IMAGE],
+        ...(maskPrepared ? { temperature: 0.35 as const } : {}),
+        imageConfig,
+      },
     });
 
-    const imagePart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-    if (imagePart?.inlineData?.data) {
-      return `data:image/png;base64,${imagePart.inlineData.data}`;
-    }
-    throw new Error("No image was returned from the transformation.");
+    return extractInlineImageDataUrl(response);
   });
 };
