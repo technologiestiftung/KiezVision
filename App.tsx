@@ -13,6 +13,7 @@ import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
 import { transformImage } from './services/geminiService';
 import { geocodeBerlin, fetchMapillaryImage } from './services/mapillaryService';
+import { buildTransformPrompt } from './services/presetRules';
 import {
   isFileSystemAccessSupported,
   getRootHandleSilently,
@@ -848,9 +849,10 @@ export default function App() {
 
     try {
       const aspectRatio = await getBestAspectRatio(currentImage);
+      const finalPrompt = buildTransformPrompt(prompt, { editMode });
       const newImageDataRaw = await transformImage(
         currentImage, 
-        prompt, 
+        finalPrompt,
         editMode === 'mask' ? maskBase64 : null,
         highQuality,
         aspectRatio
