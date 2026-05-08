@@ -13,7 +13,7 @@ import { InpaintCanvas } from './components/InpaintCanvas';
 import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
 import { transformImage } from './services/geminiService';
-import { geocodeBerlin, fetchMapillaryImage } from './services/mapillaryService';
+import { geocodeBerlin, fetchMapillaryImage, reverseGeocodeLocation } from './services/mapillaryService';
 import { buildTransformPrompt } from './services/presetRules';
 import {
   isFileSystemAccessSupported,
@@ -92,7 +92,6 @@ export default function App() {
       yourStreet: "Your Street",
       searchPlaceholder: "Search for a street (e.g. Kurfürstendamm)...",
       autoDetect: "Auto Detect",
-      realPhotos: "Street Image",
       go: "GO",
       exploreDistricts: "Explore Districts",
       uploadPhoto: "Upload Photo",
@@ -135,6 +134,10 @@ export default function App() {
       placeholderMask: "Describe what to put in the selected area (e.g. 'add a tree', 'park bench')...",
       loading: "Loading from library...",
       fetchingStreet: "Fetching your street...",
+      detectingLocation: "Detecting your location...",
+      locationUnavailable: "Current location is not available in this browser.",
+      locationPermissionDenied: "Location permission was denied. Allow location access and try again.",
+      locationNotFound: "Could not identify a nearby street for your current location.",
       synthesizing: "Synthesizing...",
       iterations: "Model Iterations",
       maskSettings: "Mask settings",
@@ -157,7 +160,6 @@ export default function App() {
       yourStreet: "neu denken",
       searchPlaceholder: "Nach einer Straße suchen (z.B. Kurfürstendamm)...",
       autoDetect: "Auto-Erkennung",
-      realPhotos: "Straßenbild",
       go: "LOS",
       exploreDistricts: "Bezirke erkunden",
       uploadPhoto: "Foto hochladen",
@@ -192,6 +194,10 @@ export default function App() {
       areaEdit: "Bereich bearbeiten",
       save: "Speichern",
       fetchingStreet: "Suche deine Straße...",
+      detectingLocation: "Standort wird ermittelt...",
+      locationUnavailable: "Der aktuelle Standort ist in diesem Browser nicht verfügbar.",
+      locationPermissionDenied: "Standortberechtigung wurde abgelehnt. Erlaube den Standortzugriff und versuche es erneut.",
+      locationNotFound: "Es konnte keine nahegelegene Straße für deinen aktuellen Standort gefunden werden.",
       clearHistory: "Verlauf leeren",
       toolkit: "Transformations-Toolkit",
       size: "Größe",
@@ -307,7 +313,6 @@ export default function App() {
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false });
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<'auto' | 'real'>('auto');
   const [imageSource, setImageSource] = useState<string | null>(null);
   const [fetchedLocation, setFetchedLocation] = useState<string | null>(null);
   const [mapillaryMetadata, setMapillaryMetadata] = useState<{ link: string; capturedAt?: string } | null>(null);
@@ -321,6 +326,12 @@ export default function App() {
   const [isAreaEditEraser, setIsAreaEditEraser] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [highQuality, setHighQuality] = useState(false);
+  // Tracks whether the *current* editor image has been exported (saved/downloaded).
+  // Leaving the editor without exporting warns the user that changes will be lost.
+  const [lastExportedImage, setLastExportedImage] = useState<string | null>(null);
+  const [showLeaveEditorConfirm, setShowLeaveEditorConfirm] = useState(false);
+  const [pendingPathAfterLeaveConfirm, setPendingPathAfterLeaveConfirm] = useState<string | null>(null);
+  const lastNormalizedPathRef = useRef<string | null>(null);
   const canvasRef = useRef<{
     clear: () => void;
     getMaskDataUrl: () => string | null;
@@ -345,9 +356,28 @@ export default function App() {
       setError(null);
       setHistory([{ id: 'original', dataUrl, prompt, timestamp: Date.now() }]);
       setEditMode('comparison');
+      setLastExportedImage(null);
       navigate('/edit');
     },
     [navigate]
+  );
+
+  const hasUnexportedChanges = useMemo(() => {
+    if (view !== 'editor') return false;
+    if (!currentImage) return false;
+    return currentImage !== lastExportedImage;
+  }, [currentImage, lastExportedImage, view]);
+
+  const requestLeaveEditor = useCallback(
+    (path: string) => {
+      if (view === 'editor' && hasUnexportedChanges) {
+        setPendingPathAfterLeaveConfirm(path);
+        setShowLeaveEditorConfirm(true);
+        return;
+      }
+      navigate(path);
+    },
+    [hasUnexportedChanges, navigate, view]
   );
 
   useEffect(() => {
@@ -433,6 +463,19 @@ export default function App() {
       navigate('/', { replace: true });
     }
   }, [location.pathname, navigate, normalizedPath]);
+
+  // Catch browser back/forward (or any route change) away from the editor when
+  // there are unexported changes, and present a confirmation modal.
+  useEffect(() => {
+    const prev = lastNormalizedPathRef.current;
+    lastNormalizedPathRef.current = normalizedPath;
+    if (!prev) return;
+    if (prev === '/edit' && normalizedPath !== '/edit' && hasUnexportedChanges) {
+      setPendingPathAfterLeaveConfirm(normalizedPath);
+      setShowLeaveEditorConfirm(true);
+      navigate('/edit', { replace: true });
+    }
+  }, [hasUnexportedChanges, navigate, normalizedPath]);
 
   const handleSelectKey = async () => {
     if (window.aistudio) {
@@ -665,6 +708,7 @@ export default function App() {
         timestamp: ts,
       });
       setLibrary((prev) => [entry, ...prev]);
+      setLastExportedImage(currentImage);
       alert(language === 'en' ? 'Saved to your library!' : 'In Ihrer Galerie gespeichert!');
     } catch (err: any) {
       if (err?.message === 'NO_LIBRARY_FOLDER') {
@@ -700,6 +744,49 @@ export default function App() {
       } catch (err) {
         console.warn('Failed to delete files on disk:', err);
       }
+    }
+  };
+
+  const getCurrentPosition = (): Promise<GeolocationPosition> => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('GEOLOCATION_UNSUPPORTED'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000,
+      });
+    });
+  };
+
+  const handleAutoDetect = async () => {
+    setError(null);
+    setProcessing({ isProcessing: true, statusMessage: t.detectingLocation });
+    try {
+      const position = await getCurrentPosition();
+      const detectedLocation = await reverseGeocodeLocation(
+        position.coords.latitude,
+        position.coords.longitude,
+        language
+      );
+
+      if (!detectedLocation?.displayName) {
+        throw new Error('LOCATION_NOT_FOUND');
+      }
+
+      setSearchQuery(detectedLocation.displayName);
+    } catch (err: any) {
+      if (err?.message === 'GEOLOCATION_UNSUPPORTED') {
+        setError(t.locationUnavailable);
+      } else if (err?.code === err?.PERMISSION_DENIED || err?.code === 1) {
+        setError(t.locationPermissionDenied);
+      } else {
+        setError(t.locationNotFound);
+      }
+    } finally {
+      setProcessing({ isProcessing: false });
     }
   };
 
@@ -938,6 +1025,9 @@ export default function App() {
       
       setHistory((prev) => [newImageEntry, ...prev]);
       setCurrentImage(finalImageData);
+      // Any transform creates a version that hasn't been saved/downloaded yet.
+      // We intentionally do NOT clear lastExportedImage here; the comparison in
+      // hasUnexportedChanges will handle the "dirty" state.
       
       // Reset tools
       setEditMode('comparison');
@@ -979,7 +1069,7 @@ export default function App() {
       <header className="border-b-2 border-eb-900 bg-tsb sticky top-0 z-50">
         <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+            <button onClick={() => requestLeaveEditor('/')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
               <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </button>
             <div>
@@ -1002,7 +1092,7 @@ export default function App() {
                 onClick={() => {
                   setInpaintMountKey((k) => k + 1);
                   setEditMode('mask');
-                }} 
+                }}
                 className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'mask' ? 'bg-coral-100 text-eb-900' : 'text-eb-50 hover:bg-white/10'}`}
               >
                 <Paintbrush2 className="w-4 h-4" /> {t.areaEdit}
@@ -1012,7 +1102,7 @@ export default function App() {
 
           <div className="flex items-center gap-4 h-10">
             <button 
-              onClick={() => navigate('/library')}
+              onClick={() => requestLeaveEditor('/library')}
               className={`flex items-center gap-2 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === 'library' ? 'bg-eb-900 text-eb-50' : 'bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]'}`}
             >
               <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
@@ -1035,6 +1125,7 @@ export default function App() {
                     a.href = currentImage;
                     a.download = filename;
                     a.click();
+                    setLastExportedImage(currentImage);
                   }} 
                   className="bg-eb-900 text-eb-50 px-4 h-full border-2 border-eb-900 text-xs font-black transition-all hover:bg-coral-500 flex items-center justify-center"
                 >
@@ -1111,34 +1202,22 @@ export default function App() {
             <div className="w-full space-y-8">
               <div className="bg-white border-4 border-eb-900 p-6 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)]">
                 <div className="flex justify-center mb-4">
-                  <div className="flex items-center border-2 border-eb-900 bg-white overflow-hidden shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] h-10">
-                    <button
-                      type="button"
-                      onClick={() => setSearchMode('auto')}
-                      className={`px-4 h-full text-[10px] font-black transition-all ${
-                        searchMode === 'auto' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'
-                      }`}
-                    >
-                      {t.autoDetect}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSearchMode('real')}
-                      className={`px-4 h-full text-[10px] font-black transition-all border-l-2 border-eb-900 ${
-                        searchMode === 'real' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'
-                      }`}
-                    >
-                      {t.realPhotos}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAutoDetect}
+                    disabled={processing.isProcessing}
+                    className="px-4 h-10 text-[10px] font-black transition-all border-2 border-eb-900 bg-eb-900 text-eb-50 shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t.autoDetect}
+                  </button>
                 </div>
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 pr-28 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
                   <button
                     type="submit"
                     disabled={!searchQuery.trim() || processing.isProcessing}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all cursor-pointer"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {t.go}
                   </button>
@@ -1612,13 +1691,13 @@ export default function App() {
                         <h4 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.size}</h4>
                         <span className="font-mono text-xs bg-eb-900 text-eb-50 px-2 py-0.5">{brushSize}PX</span>
                       </div>
-                      <input 
-                        type="range" 
-                        min="10" 
-                        max="150" 
-                        value={brushSize} 
-                        onChange={(e) => setBrushSize(parseInt(e.target.value))} 
-                        className="w-full h-6 accent-eb-900 appearance-none bg-gray-100 border border-eb-900 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-eb-900 [&::-webkit-slider-thumb]:rounded-none mb-6" 
+                      <input
+                        type="range"
+                        min="10"
+                        max="150"
+                        value={brushSize}
+                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                        className="w-full h-6 accent-eb-900 appearance-none bg-gray-100 border border-eb-900 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-eb-900 [&::-webkit-slider-thumb]:rounded-none mb-6"
                       />
                       <div className="flex items-center gap-2 mb-4">
                         <button
@@ -1712,6 +1791,63 @@ export default function App() {
                 {t.takePhoto}
               </button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showLeaveEditorConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[250] flex items-center justify-center bg-eb-900/70 backdrop-blur-sm p-6"
+          >
+            <motion.div
+              initial={{ y: 12, scale: 0.98, opacity: 0 }}
+              animate={{ y: 0, scale: 1, opacity: 1 }}
+              exit={{ y: 12, scale: 0.98, opacity: 0 }}
+              className="w-full max-w-lg bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)]"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="border-b-4 border-eb-900 bg-kv-chrome px-6 py-4">
+                <h3 className="text-xl font-black tracking-tighter">
+                  {language === 'en' ? 'Leave editor?' : 'Editor verlassen?'}
+                </h3>
+              </div>
+              <div className="px-6 py-5">
+                <p className="text-sm font-bold text-eb-900/80 leading-relaxed">
+                  {language === 'en'
+                    ? 'If you leave now, all changes will be lost unless you Save or Download.'
+                    : 'Wenn Sie jetzt verlassen, gehen alle Änderungen verloren, sofern Sie nicht speichern oder herunterladen.'}
+                </p>
+              </div>
+              <div className="px-6 pb-6 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLeaveEditorConfirm(false);
+                    setPendingPathAfterLeaveConfirm(null);
+                  }}
+                  className="px-6 h-12 border-2 border-eb-900 bg-white text-eb-900 text-xs font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none hover:bg-coral-100 transition-all"
+                >
+                  {language === 'en' ? 'Cancel' : 'Abbrechen'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = pendingPathAfterLeaveConfirm || '/';
+                    setShowLeaveEditorConfirm(false);
+                    setPendingPathAfterLeaveConfirm(null);
+                    navigate(next);
+                  }}
+                  className="px-6 h-12 border-2 border-eb-900 bg-eb-900 text-eb-50 text-xs font-black shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 transition-all"
+                >
+                  {language === 'en' ? 'Confirm' : 'Bestätigen'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
