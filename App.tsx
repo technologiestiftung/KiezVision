@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
+import heic2any from 'heic2any';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
@@ -41,7 +42,7 @@ const BERLIN_DISTRICTS = [
   "Neukölln", "Charlottenburg", "Schöneberg", "Wedding", "Moabit", "Tempelhof"
 ];
 
-const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
+const kiezvisionLogoUrl = '/kiezvision_logo.png';
 
 function BackToHomeNavButton({
   navigate,
@@ -507,65 +508,89 @@ export default function App() {
     };
   }, [library, folderStatus]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setProcessing({ isProcessing: true, statusMessage: 'Processing your image...' });
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      loadImageIntoEditor(result, 'Original Upload');
-      setProcessing({ isProcessing: false });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+  const isHeicLike = (file: File): boolean => {
+    const name = file.name.toLowerCase();
+    const type = (file.type || '').toLowerCase();
+    return (
+      name.endsWith('.heic') ||
+      name.endsWith('.heif') ||
+      type === 'image/heic' ||
+      type === 'image/heif' ||
+      type === 'image/heic-sequence' ||
+      type === 'image/heif-sequence'
+    );
   };
 
-  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+  const readFileAsDataUrl = (file: Blob): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(new Error('Failed to read file'));
+      r.readAsDataURL(file);
+    });
+
+  const fileToDisplayBlob = async (file: File): Promise<Blob> => {
+    if (!isHeicLike(file)) return file;
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    // heic2any can return a single Blob or an array of Blobs; we only take the first.
+    return Array.isArray(converted) ? converted[0] : converted;
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files: File[] = input.files
+      ? Array.from(input.files).filter((f): f is File => f instanceof File)
+      : [];
+    input.value = '';
     if (!files.length) return;
 
-    setProcessing({ isProcessing: true, statusMessage: language === 'en' ? 'Processing your images...' : 'Bilder werden verarbeitet...' });
+    const imageFiles = files.filter((f) => f.type.startsWith('image/') || isHeicLike(f));
+    if (!imageFiles.length) return;
+
+    if (imageFiles.length === 1) {
+      const file = imageFiles[0];
+      setProcessing({
+        isProcessing: true,
+        statusMessage: language === 'en' ? 'Processing your image...' : 'Bild wird verarbeitet...',
+      });
+      try {
+        const blob = await fileToDisplayBlob(file);
+        const dataUrl = await readFileAsDataUrl(blob);
+        loadImageIntoEditor(dataUrl, 'Original Upload');
+      } catch (err: any) {
+        setError(err?.message || 'Failed to process upload.');
+      } finally {
+        setProcessing({ isProcessing: false });
+      }
+      return;
+    }
+
+    setProcessing({
+      isProcessing: true,
+      statusMessage: language === 'en' ? 'Processing your images...' : 'Bilder werden verarbeitet...',
+    });
     setError(null);
 
     try {
-      const imageFiles = files
-        .filter((f) => f.type.startsWith('image/'))
-        .sort((a, b) => {
-          const aLabel = (a as File & { webkitRelativePath?: string }).webkitRelativePath || a.name;
-          const bLabel = (b as File & { webkitRelativePath?: string }).webkitRelativePath || b.name;
-          return aLabel.localeCompare(bLabel);
-        });
-
-      const readAsDataUrl = (file: File) =>
-        new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error('Failed to read file'));
-          r.readAsDataURL(file);
-        });
-
       const entries: GeneratedImage[] = [];
       for (const file of imageFiles) {
-        const dataUrl = await readAsDataUrl(file);
-        const label = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const blob = await fileToDisplayBlob(file);
+        const dataUrl = await readFileAsDataUrl(blob);
         entries.push({
           id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
           dataUrl,
-          prompt: label,
+          prompt: file.name,
           timestamp: Date.now(),
         });
       }
-
       setUploadedGallery(entries);
       setSelectedGalleryId(entries[0]?.id ?? null);
       navigate('/image-gallery');
     } catch (err: any) {
-      setError(err?.message || 'Failed to process folder upload.');
+      setError(err?.message || 'Failed to process upload.');
+      setProcessing({ isProcessing: false });
     } finally {
       setProcessing({ isProcessing: false });
-      e.target.value = '';
     }
   };
 
@@ -1108,7 +1133,13 @@ export default function App() {
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
                   <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
-                  <button type="submit" disabled={!searchQuery.trim() || processing.isProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all">{t.go}</button>
+                  <button
+                    type="submit"
+                    disabled={!searchQuery.trim() || processing.isProcessing}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all cursor-pointer"
+                  >
+                    {t.go}
+                  </button>
                 </form>
 
                 <div className="mt-6 pt-6 border-t-2 border-eb-900/10">
@@ -1130,19 +1161,7 @@ export default function App() {
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2 text-center">
                 <label className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
                   <Upload className="w-6 h-6" /> {t.uploadPhoto}
-                  <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                </label>
-
-                <label className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
-                  <FolderOpen className="w-6 h-6" /> {t.openFolder}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    {...({ webkitdirectory: '', directory: '' } as any)}
-                    onChange={handleFolderUpload}
-                    className="hidden"
-                  />
+                  <input type="file" accept="image/*,.heic,.heif" multiple onChange={handleFileUpload} className="hidden" />
                 </label>
                 
                 <button
