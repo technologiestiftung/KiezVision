@@ -1,26 +1,27 @@
 import React, { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { RotateCcw, Palette, MousePointer2, Paintbrush2 } from 'lucide-react';
-
 interface InpaintCanvasProps {
   image: string;
   onOverlayChange: (data: { mask?: string } | null) => void;
   brushSize: number;
+  isEraser: boolean;
 }
 
 const COLORS = [
   '#ffffff',
 ];
 
-export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProps>(({ 
-  image, 
-  onOverlayChange, 
-  brushSize,
-}, ref) => {
+export const InpaintCanvas = forwardRef<
+  { clear: () => void; getMaskDataUrl: () => string | null },
+  InpaintCanvasProps
+>(({ image, onOverlayChange, brushSize, isEraser }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
-  const [isEraser, setIsEraser] = useState(false);
+  /** Prevents paint until base image has sized canvases (avoids onload clearing strokes mid-brush). */
+  const baseImageReadyRef = useRef(false);
+  /** Discards stale Image() decode callbacks after remount or image change. */
+  const imageLoadGenRef = useRef(0);
   const selectedColor = '#ffffff';
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -35,24 +36,62 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
     }
   };
 
+  const buildMaskDataUrlFromDrawing = (): string | null => {
+    const canvas = drawingCanvasRef.current;
+    if (!canvas || !canvas.width || !canvas.height) return null;
+
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = canvas.width;
+    maskCanvas.height = canvas.height;
+    const mctx = maskCanvas.getContext('2d');
+    if (!mctx) return null;
+
+    mctx.fillStyle = 'black';
+    mctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    mctx.drawImage(canvas, 0, 0);
+
+    const imageData = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      if (brightness > 10) {
+        data[i] = 255;
+        data[i + 1] = 255;
+        data[i + 2] = 255;
+      } else {
+        data[i] = 0;
+        data[i + 1] = 0;
+        data[i + 2] = 0;
+      }
+      data[i + 3] = 255;
+    }
+    mctx.putImageData(imageData, 0, 0);
+    return maskCanvas.toDataURL('image/png');
+  };
+
   useImperativeHandle(ref, () => ({
-    clear: clearCanvas
+    clear: clearCanvas,
+    getMaskDataUrl: () => buildMaskDataUrlFromDrawing(),
   }));
 
   const lastImageRef = useRef<string>('');
 
   const initCanvases = useCallback(() => {
-    // Only initialize if the image has actually changed
-    if (image === lastImageRef.current) return;
+    // Same URL but decode never finished — must retry, not bail
+    if (image === lastImageRef.current && baseImageReadyRef.current) return;
+
     lastImageRef.current = image;
+    baseImageReadyRef.current = false;
+
+    const loadId = ++imageLoadGenRef.current;
 
     // Clear any existing mask when the background image changes
     onOverlayChange(null);
 
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.src = image;
     img.onload = () => {
+      if (loadId !== imageLoadGenRef.current) return;
       const imgCanvas = imageCanvasRef.current;
       const drwCanvas = drawingCanvasRef.current;
       if (!imgCanvas || !drwCanvas) return;
@@ -69,7 +108,13 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
 
       const dctx = drwCanvas.getContext('2d');
       dctx?.clearRect(0, 0, drwCanvas.width, drwCanvas.height);
+      baseImageReadyRef.current = true;
     };
+    img.onerror = () => {
+      if (loadId !== imageLoadGenRef.current) return;
+      baseImageReadyRef.current = false;
+    };
+    img.src = image;
   }, [image, onOverlayChange]);
 
   useEffect(() => {
@@ -120,6 +165,7 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
   };
 
   const draw = (e: any) => {
+    if (!baseImageReadyRef.current) return;
     if (e.type.startsWith('touch')) {
       if (e.cancelable) e.preventDefault();
     }
@@ -144,42 +190,9 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
   };
 
   const updateOverlays = () => {
-    const canvas = drawingCanvasRef.current;
-    if (!canvas) return;
-
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = canvas.width;
-    maskCanvas.height = canvas.height;
-    const mctx = maskCanvas.getContext('2d');
-    if (mctx) {
-      mctx.fillStyle = 'black';
-      mctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-      
-      // Use color filtering to ensure the mask is purely black and white
-      mctx.drawImage(canvas, 0, 0);
-      
-      const imageData = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        // If any RGB component is > 0, make it white (thresholding)
-        const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
-        if (brightness > 10) {
-          data[i] = 255;
-          data[i+1] = 255;
-          data[i+2] = 255;
-        } else {
-          data[i] = 0;
-          data[i+1] = 0;
-          data[i+2] = 0;
-        }
-        data[i+3] = 255; // Fully opaque
-      }
-      mctx.putImageData(imageData, 0, 0);
-      
-      onOverlayChange({ 
-        mask: maskCanvas.toDataURL('image/png')
-      });
-    }
+    if (!baseImageReadyRef.current) return;
+    const dataUrl = buildMaskDataUrlFromDrawing();
+    if (dataUrl) onOverlayChange({ mask: dataUrl });
   };
 
   const stopDrawing = () => {
@@ -190,6 +203,7 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
   };
 
   const startDrawing = (e: any) => {
+    if (!baseImageReadyRef.current) return;
     if (e.type.startsWith('touch')) {
       if (e.cancelable) e.preventDefault();
     }
@@ -223,17 +237,14 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
     const { width: cw, height: ch } = containerSize;
     const { width: iw, height: ih } = imageSize;
     if (!cw || !ch || !iw || !ih) {
-      return { width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%' };
+      return { width: '100%', height: '100%' };
     }
 
-    const scale = Math.min(cw / iw, ch / ih);
-    const width = iw * scale;
-    const height = ih * scale;
+    // Cover container: fills frame edge-to-edge; excess cropped by overflow-hidden parent
+    const scale = Math.max(cw / iw, ch / ih);
     return {
-      width: `${width}px`,
-      height: `${height}px`,
-      maxWidth: '100%',
-      maxHeight: '100%',
+      width: `${iw * scale}px`,
+      height: `${ih * scale}px`,
     };
   };
 
@@ -284,43 +295,6 @@ export const InpaintCanvas = forwardRef<{ clear: () => void }, InpaintCanvasProp
             {isEraser && <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-red-500">ERASER</div>}
           </div>
         )}
-        
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-tsb border-2 border-eb-50 px-2 py-2 shadow-[8px_8px_0px_0px_rgba(30,55,145,0.45)] z-20">
-          <div className="flex items-center gap-1 pr-2 border-r border-eb-50/25">
-            <button 
-              onClick={() => setIsEraser(false)} 
-              className={`h-11 w-11 flex items-center justify-center transition-all ${!isEraser ? 'bg-coral-100 text-eb-900 shadow-inner shadow-eb-900/20 font-black' : 'text-eb-50 hover:bg-white/10'}`}
-              title="Brush"
-            >
-              <Paintbrush2 className="w-5 h-5" />
-            </button>
-            <button 
-              onClick={() => setIsEraser(true)} 
-              className={`h-11 w-11 flex items-center justify-center transition-all ${isEraser ? 'bg-coral-500 text-eb-50 shadow-inner shadow-eb-900/20 font-black' : 'text-eb-50 hover:bg-white/10'}`}
-              title="Eraser"
-            >
-              <div className="w-5 h-5 flex items-center justify-center font-black text-[12px]">E</div>
-            </button>
-          </div>
-
-          <button onClick={clearCanvas} className="h-11 w-11 flex items-center justify-center text-eb-50 hover:bg-white/10 transition-colors">
-            <RotateCcw className="w-5 h-5" />
-          </button>
-
-          <div className="flex items-center gap-2 text-[10px] font-black text-eb-50 tracking-widest px-4 border-l border-eb-50/25">
-            Area Edit Tool
-          </div>
-        </div>
-
-        <div className="absolute top-10 left-10 z-20 flex flex-col gap-2">
-          <div className="bg-coral-100 text-eb-900 px-4 py-2 border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] text-[11px] font-black">
-            Selection Mode
-          </div>
-          <div className="bg-white border-2 border-eb-900 p-4 text-[10px] font-bold text-eb-900 max-w-[240px] shadow-[6px_6px_0px_0px_rgba(32,32,27,0.12)] tracking-tight">
-            <span className="text-coral-500 font-black block mb-2 underline decoration-2">Pro Tip: Placement</span>
-            Paint the <span className="underline">exact spot</span> where the object's base touches the ground. The AI uses the <span className="bg-eb-900 text-eb-50 px-1">bottom</span> of your paint as the anchor.
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
+import heic2any from 'heic2any';
 import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
   History, RotateCcw, Search, MousePointer2, Paintbrush2, 
-  Sliders, Wand2, Camera, Library, Save, ArrowLeft, Trash2, FolderOpen
+  Sliders, Wand2, Camera, Library, Save, ArrowLeft, Trash2, FolderOpen, Eraser
 } from 'lucide-react';
 import { BeforeAfterSlider } from './components/BeforeAfterSlider';
 import { InpaintCanvas } from './components/InpaintCanvas';
@@ -13,6 +14,7 @@ import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
 import { transformImage } from './services/geminiService';
 import { geocodeBerlin, fetchMapillaryImage, reverseGeocodeLocation } from './services/mapillaryService';
+import { buildTransformPrompt } from './services/presetRules';
 import {
   isFileSystemAccessSupported,
   getRootHandleSilently,
@@ -41,7 +43,7 @@ const BERLIN_DISTRICTS = [
   "Neukölln", "Charlottenburg", "Schöneberg", "Wedding", "Moabit", "Tempelhof"
 ];
 
-const kiezvisionLogoUrl = new URL('./src/assets/images/kiezvision_logo_1777989140951.png', import.meta.url).href;
+const kiezvisionLogoUrl = '/kiezvision_logo.png';
 
 function BackToHomeNavButton({
   navigate,
@@ -84,7 +86,7 @@ export default function App() {
 
   const t = {
     en: {
-      tagline: "Berlin Transformation Lab",
+      tagline: "Street vision toolkit",
       subtitle: "Envision a greener, car-free future using real Mapillary imagery or AI visions.",
       reimagine: "Reimagine",
       yourStreet: "Your Street",
@@ -138,6 +140,12 @@ export default function App() {
       locationNotFound: "Could not identify a nearby street for your current location.",
       synthesizing: "Synthesizing...",
       iterations: "Model Iterations",
+      maskSettings: "Mask settings",
+      brush: "Brush",
+      eraser: "Eraser",
+      clearMask: "Clear mask",
+      areaEditTipTitle: "Placement tip",
+      areaEditTipBody: "Brush roughly where you want the change — it is only a hint. The model fits the scene as a whole photo.",
       sourceMapillary: "Mapillary Real Image",
       sourceAI: "AI Generated",
       realPhoto: "real photo",
@@ -146,7 +154,7 @@ export default function App() {
       cancelCamera: "Cancel",
     },
     de: {
-      tagline: "Berlin Transformations-Labor",
+      tagline: "Straßen-Vision-Toolkit",
       subtitle: "Stellen Sie sich eine grünere, autofreie Zukunft vor, basierend auf echten Mapillary-Bildern oder KI-Visionen.",
       reimagine: "Ihre Straße",
       yourStreet: "neu denken",
@@ -200,6 +208,12 @@ export default function App() {
       loading: "Lade aus Galerie...",
       synthesizing: "Synthese läuft...",
       iterations: "Modell-Iterationen",
+      maskSettings: "Masken-Einstellungen",
+      brush: "Pinsel",
+      eraser: "Radierer",
+      clearMask: "Maske leeren",
+      areaEditTipTitle: "Platzierung",
+      areaEditTipBody: "Malen Sie ungefähr dort, wo Sie die Änderung wollen — nur ein Hinweis. Das Modell fügt sie ins Gesamtbild ein.",
       sourceMapillary: "Echtes Bild",
       sourceAI: "KI-Generiert",
       realPhoto: "Echtes Foto",
@@ -307,6 +321,9 @@ export default function App() {
   const [editMode, setEditMode] = useState<'comparison' | 'mask'>('comparison');
   const [maskBase64, setMaskBase64] = useState<string | null>(null);
   const [brushSize, setBrushSize] = useState(40);
+  /** Bumps on each "Area Edit" entry so InpaintCanvas always mounts fresh (avoids one-shot brush bugs from reused state). */
+  const [inpaintMountKey, setInpaintMountKey] = useState(0);
+  const [isAreaEditEraser, setIsAreaEditEraser] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [highQuality, setHighQuality] = useState(false);
   // Tracks whether the *current* editor image has been exported (saved/downloaded).
@@ -315,7 +332,10 @@ export default function App() {
   const [showLeaveEditorConfirm, setShowLeaveEditorConfirm] = useState(false);
   const [pendingPathAfterLeaveConfirm, setPendingPathAfterLeaveConfirm] = useState<string | null>(null);
   const lastNormalizedPathRef = useRef<string | null>(null);
-  const canvasRef = useRef<any>(null);
+  const canvasRef = useRef<{
+    clear: () => void;
+    getMaskDataUrl: () => string | null;
+  } | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const cameraFileFallbackRef = useRef<HTMLInputElement>(null);
@@ -475,6 +495,10 @@ export default function App() {
     }
   }, [library]);
 
+  useEffect(() => {
+    setIsAreaEditEraser(false);
+  }, [inpaintMountKey]);
+
   // On mount, detect the persisted library folder status without prompting.
   // We don't auto-prompt; the user re-grants permission via the "Reconnect"
   // banner / button (browsers require a user gesture for that).
@@ -528,65 +552,89 @@ export default function App() {
     };
   }, [library, folderStatus]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setProcessing({ isProcessing: true, statusMessage: 'Processing your image...' });
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      loadImageIntoEditor(result, 'Original Upload');
-      setProcessing({ isProcessing: false });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+  const isHeicLike = (file: File): boolean => {
+    const name = file.name.toLowerCase();
+    const type = (file.type || '').toLowerCase();
+    return (
+      name.endsWith('.heic') ||
+      name.endsWith('.heif') ||
+      type === 'image/heic' ||
+      type === 'image/heif' ||
+      type === 'image/heic-sequence' ||
+      type === 'image/heif-sequence'
+    );
   };
 
-  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+  const readFileAsDataUrl = (file: Blob): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(new Error('Failed to read file'));
+      r.readAsDataURL(file);
+    });
+
+  const fileToDisplayBlob = async (file: File): Promise<Blob> => {
+    if (!isHeicLike(file)) return file;
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    // heic2any can return a single Blob or an array of Blobs; we only take the first.
+    return Array.isArray(converted) ? converted[0] : converted;
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files: File[] = input.files
+      ? Array.from(input.files).filter((f): f is File => f instanceof File)
+      : [];
+    input.value = '';
     if (!files.length) return;
 
-    setProcessing({ isProcessing: true, statusMessage: language === 'en' ? 'Processing your images...' : 'Bilder werden verarbeitet...' });
+    const imageFiles = files.filter((f) => f.type.startsWith('image/') || isHeicLike(f));
+    if (!imageFiles.length) return;
+
+    if (imageFiles.length === 1) {
+      const file = imageFiles[0];
+      setProcessing({
+        isProcessing: true,
+        statusMessage: language === 'en' ? 'Processing your image...' : 'Bild wird verarbeitet...',
+      });
+      try {
+        const blob = await fileToDisplayBlob(file);
+        const dataUrl = await readFileAsDataUrl(blob);
+        loadImageIntoEditor(dataUrl, 'Original Upload');
+      } catch (err: any) {
+        setError(err?.message || 'Failed to process upload.');
+      } finally {
+        setProcessing({ isProcessing: false });
+      }
+      return;
+    }
+
+    setProcessing({
+      isProcessing: true,
+      statusMessage: language === 'en' ? 'Processing your images...' : 'Bilder werden verarbeitet...',
+    });
     setError(null);
 
     try {
-      const imageFiles = files
-        .filter((f) => f.type.startsWith('image/'))
-        .sort((a, b) => {
-          const aLabel = (a as File & { webkitRelativePath?: string }).webkitRelativePath || a.name;
-          const bLabel = (b as File & { webkitRelativePath?: string }).webkitRelativePath || b.name;
-          return aLabel.localeCompare(bLabel);
-        });
-
-      const readAsDataUrl = (file: File) =>
-        new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error('Failed to read file'));
-          r.readAsDataURL(file);
-        });
-
       const entries: GeneratedImage[] = [];
       for (const file of imageFiles) {
-        const dataUrl = await readAsDataUrl(file);
-        const label = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const blob = await fileToDisplayBlob(file);
+        const dataUrl = await readFileAsDataUrl(blob);
         entries.push({
           id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
           dataUrl,
-          prompt: label,
+          prompt: file.name,
           timestamp: Date.now(),
         });
       }
-
       setUploadedGallery(entries);
       setSelectedGalleryId(entries[0]?.id ?? null);
       navigate('/image-gallery');
     } catch (err: any) {
-      setError(err?.message || 'Failed to process folder upload.');
+      setError(err?.message || 'Failed to process upload.');
+      setProcessing({ isProcessing: false });
     } finally {
       setProcessing({ isProcessing: false });
-      e.target.value = '';
     }
   };
 
@@ -844,33 +892,31 @@ export default function App() {
           const mctx = maskCanvas.getContext('2d');
           if (!mctx) return resolve(transformedBase64);
           
-          // Use filter for simple feathering
           mctx.drawImage(mask, 0, 0, maskCanvas.width, maskCanvas.height);
-          
-          // Convert binary mask (Black/White) to alpha mask (Transparent/Opaque)
+
+          // Soft matte: brush = rough placement reference; smooth alpha + wide blur blends into full frame
           const maskImageData = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
           const pixels = maskImageData.data;
           for (let i = 0; i < pixels.length; i += 4) {
-            const brightness = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
-            // Set alpha based on brightness (White => 255, Black => 0)
-            pixels[i+3] = brightness > 50 ? 255 : 0;
-            // Also ensure the pixel is white for the destination-in operation
+            const lum = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+            const a =
+              lum < 22 ? 0 : lum > 118 ? 255 : Math.round(((lum - 22) / (118 - 22)) * 255);
+            pixels[i + 3] = a;
             pixels[i] = 255;
-            pixels[i+1] = 255;
-            pixels[i+2] = 255;
+            pixels[i + 1] = 255;
+            pixels[i + 2] = 255;
           }
           mctx.putImageData(maskImageData, 0, 0);
 
-          // Apply slight blur to the mask now that it has alpha
           const blurredMaskCanvas = document.createElement('canvas');
           blurredMaskCanvas.width = maskCanvas.width;
           blurredMaskCanvas.height = maskCanvas.height;
           const bmctx = blurredMaskCanvas.getContext('2d');
           if (bmctx) {
-            // Minimal blur for sharp edges (approx 0.3% of width)
-            const blurRadius = Math.max(1, Math.round(original.width / 800));
+            const blurRadius = Math.max(6, Math.min(48, Math.round(original.width / 220)));
             bmctx.filter = `blur(${blurRadius}px)`;
             bmctx.drawImage(maskCanvas, 0, 0);
+            bmctx.filter = 'none';
           }
           
           // 3. Draw transformed image only through the mask
@@ -934,11 +980,26 @@ export default function App() {
     setError(null);
 
     try {
+      let maskForRun: string | null = null;
+      if (editMode === 'mask') {
+        const flushed = canvasRef.current?.getMaskDataUrl?.() ?? null;
+        maskForRun = flushed || maskBase64;
+        if (!maskForRun) {
+          setError(
+            language === 'en'
+              ? 'Paint an area on the image first (Area Edit brush).'
+              : 'Bitte zuerst einen Bereich mit dem Pinsel markieren (Bereich bearbeiten).',
+          );
+          return;
+        }
+      }
+
       const aspectRatio = await getBestAspectRatio(currentImage);
+      const finalPrompt = buildTransformPrompt(prompt, { editMode });
       const newImageDataRaw = await transformImage(
         currentImage, 
         prompt, 
-        editMode === 'mask' ? maskBase64 : null,
+        editMode === 'mask' ? maskForRun : null,
         highQuality,
         aspectRatio
       );
@@ -946,10 +1007,9 @@ export default function App() {
       // OPTIMIZATION: If we used a mask, strictly composite the new data onto the original area
       // this prevents the AI from changing unmasked pixels like buildings.
       let finalImageData = newImageDataRaw;
-      const activeMask = editMode === 'mask' ? maskBase64 : null;
-      if (activeMask) {
+      if (maskForRun) {
         try {
-          finalImageData = await compositeImageWithMask(currentImage, newImageDataRaw, activeMask);
+          finalImageData = await compositeImageWithMask(currentImage, newImageDataRaw, maskForRun);
         } catch (compErr) {
           console.warn("Mask composition failed, using raw AI output:", compErr);
         }
@@ -1029,7 +1089,10 @@ export default function App() {
                 <MousePointer2 className="w-4 h-4" /> {t.compare}
               </button>
               <button 
-                onClick={() => setEditMode('mask')} 
+                onClick={() => {
+                  setInpaintMountKey((k) => k + 1);
+                  setEditMode('mask');
+                }}
                 className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'mask' ? 'bg-coral-100 text-eb-900' : 'text-eb-50 hover:bg-white/10'}`}
               >
                 <Paintbrush2 className="w-4 h-4" /> {t.areaEdit}
@@ -1151,7 +1214,13 @@ export default function App() {
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
                   <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 pr-28 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
-                  <button type="submit" disabled={!searchQuery.trim() || processing.isProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all disabled:opacity-50 disabled:cursor-not-allowed">{t.go}</button>
+                  <button
+                    type="submit"
+                    disabled={!searchQuery.trim() || processing.isProcessing}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-coral-500 hover:bg-eb-900 text-eb-50 px-8 h-12 border-2 border-eb-900 font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t.go}
+                  </button>
                 </form>
 
                 <div className="mt-6 pt-6 border-t-2 border-eb-900/10">
@@ -1173,19 +1242,7 @@ export default function App() {
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2 text-center">
                 <label className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
                   <Upload className="w-6 h-6" /> {t.uploadPhoto}
-                  <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                </label>
-
-                <label className="group w-full sm:w-auto cursor-pointer bg-white text-eb-900 px-8 h-16 border-2 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all flex items-center justify-center gap-3 text-lg font-black tracking-tighter">
-                  <FolderOpen className="w-6 h-6" /> {t.openFolder}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    {...({ webkitdirectory: '', directory: '' } as any)}
-                    onChange={handleFolderUpload}
-                    className="hidden"
-                  />
+                  <input type="file" accept="image/*,.heic,.heif" multiple onChange={handleFileUpload} className="hidden" />
                 </label>
                 
                 <button
@@ -1522,9 +1579,9 @@ export default function App() {
         )}
 
         {view === 'editor' && originalImage && (
-          <div className="grid grid-cols-12 h-[calc(100vh-80px)] min-h-0">
-            <div className="col-span-12 lg:col-span-8 flex flex-col h-full min-h-0 bg-white border-r-2 border-eb-900">
-              <div className="relative flex-1 min-h-0 bg-kv-chrome overflow-hidden">
+          <div className="flex flex-col lg:grid lg:grid-cols-12 min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] lg:max-h-[calc(100vh-80px)]">
+            <div className="order-1 lg:order-none col-span-12 lg:col-span-8 flex flex-col flex-1 min-h-0 w-full lg:h-full lg:max-h-full bg-white border-r-0 lg:border-r-2 border-eb-900">
+              <div className="relative flex-1 min-h-[45vh] lg:min-h-0 bg-kv-chrome overflow-hidden">
                  {processing.isProcessing && (
                    <motion.div 
                      initial={{ opacity: 0 }}
@@ -1550,10 +1607,12 @@ export default function App() {
                  <div className="absolute inset-0 min-h-0 bg-kv-chrome">
                   {editMode !== 'comparison' ? (
                     <InpaintCanvas 
+                        key={inpaintMountKey}
                         ref={canvasRef}
                         image={currentImage || originalImage!} 
                         onOverlayChange={handleOverlayChange}
                         brushSize={brushSize}
+                        isEraser={isAreaEditEraser}
                     />
                   ) : (
                     <BeforeAfterSlider 
@@ -1597,7 +1656,7 @@ export default function App() {
                    <h3 className="text-[11px] font-black flex items-center gap-2">
                      <History className="w-4 h-4" /> {t.iterations}
                    </h3>
-                   <button onClick={() => { if(confirm(language === 'en' ? "Discard project?" : "Projekt verwerfen?")) window.location.reload(); }} className="text-[10px] font-black text-eb-900/40 hover:text-red-600 transition-all">
+                   <button onClick={() => { if(confirm(language === 'en' ? "Discard project?" : "Projekt verwerfen?")) window.location.reload(); }} className="text-[10px] font-black text-red-600 hover:text-red-700 transition-all">
                      {t.clearHistory}
                    </button>
                 </div>
@@ -1617,7 +1676,7 @@ export default function App() {
             </div>
 
             {/* Sidebar Controls */}
-            <div className="col-span-12 lg:col-span-4 h-full bg-coral-500 flex flex-col p-8 overflow-y-auto custom-scrollbar border-t-2 lg:border-t-0 border-eb-900">
+            <div className="order-2 lg:order-none col-span-12 lg:col-span-4 w-full shrink-0 lg:h-full lg:min-h-0 bg-coral-500 flex flex-col p-8 overflow-y-auto custom-scrollbar border-t-2 lg:border-t-0 border-eb-900">
               <div className="mb-10 bg-tsb text-eb-50 p-4 shadow-[8px_8px_0px_0px_rgba(30,55,145,0.35)]">
                 <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
                   <Wand2 className="w-6 h-6" /> {t.toolkit}
@@ -1626,20 +1685,54 @@ export default function App() {
 
               <div className="space-y-10">
                 {editMode === 'mask' && (
-                <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.size}</h3>
-                    <span className="font-mono text-xs bg-eb-900 text-eb-50 px-2 py-0.5">{brushSize}PX</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="10" 
-                    max="150" 
-                    value={brushSize} 
-                    onChange={(e) => setBrushSize(parseInt(e.target.value))} 
-                    className="w-full h-6 accent-eb-900 appearance-none bg-gray-100 border border-eb-900 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-eb-900 [&::-webkit-slider-thumb]:rounded-none" 
-                  />
-                </div>
+                    <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
+                      <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1 mb-6">{t.maskSettings}</h3>
+                      <div className="flex items-center justify-between mb-6">
+                        <h4 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.size}</h4>
+                        <span className="font-mono text-xs bg-eb-900 text-eb-50 px-2 py-0.5">{brushSize}PX</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="10"
+                        max="150"
+                        value={brushSize}
+                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                        className="w-full h-6 accent-eb-900 appearance-none bg-gray-100 border border-eb-900 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-eb-900 [&::-webkit-slider-thumb]:rounded-none mb-6"
+                      />
+                      <div className="flex items-center gap-2 mb-4">
+                        <button
+                          type="button"
+                          onClick={() => setIsAreaEditEraser(false)}
+                          title={t.brush}
+                          className={`flex-1 flex items-center justify-center gap-2 py-3 border-2 border-eb-900 text-xs font-black transition-all ${
+                            !isAreaEditEraser ? 'bg-coral-100 text-eb-900 shadow-[3px_3px_0_0_rgba(32,32,27,1)]' : 'bg-white text-eb-900 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Paintbrush2 className="w-4 h-4" aria-hidden /> {t.brush}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsAreaEditEraser(true)}
+                          title={t.eraser}
+                          className={`flex-1 flex items-center justify-center gap-2 py-3 border-2 border-eb-900 text-xs font-black transition-all ${
+                            isAreaEditEraser ? 'bg-coral-500 text-eb-50 shadow-[3px_3px_0_0_rgba(32,32,27,1)]' : 'bg-white text-eb-900 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Eraser className="w-4 h-4" aria-hidden /> {t.eraser}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => canvasRef.current?.clear()}
+                        className="w-full flex items-center justify-center gap-2 py-3 border-2 border-eb-900 bg-tsb text-eb-50 text-xs font-black shadow-[4px_4px_0_0_rgba(30,55,145,0.35)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all mb-4"
+                      >
+                        <RotateCcw className="w-4 h-4" aria-hidden /> {t.clearMask}
+                      </button>
+                      <p className="text-[10px] font-bold text-eb-900 tracking-tight leading-snug border-t border-eb-900/15 pt-4">
+                        <span className="text-coral-500 font-black block mb-1">{t.areaEditTipTitle}</span>
+                        {t.areaEditTipBody}
+                      </p>
+                    </div>
                 )}
 
                 <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
