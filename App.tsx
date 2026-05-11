@@ -86,7 +86,7 @@ export default function App() {
 
   const t = {
     en: {
-      tagline: "Street vision toolkit",
+      tagline: "Kiezlabor toolkit",
       subtitle: "Envision a greener, car-free future using real Mapillary imagery or AI visions.",
       reimagine: "Reimagine",
       yourStreet: "Your Street",
@@ -127,7 +127,7 @@ export default function App() {
       save: "Save",
       clearHistory: "Clear History",
       toolkit: "Transformation Toolkit",
-      size: "Size",
+      size: "Brush Size",
       presets: "Presets",
       customCommand: "Custom Command",
       placeholderEditor: "Describe the transformation (e.g. 'add solar panels', 'planting day')...",
@@ -154,7 +154,7 @@ export default function App() {
       cancelCamera: "Cancel",
     },
     de: {
-      tagline: "Straßen-Vision-Toolkit",
+      tagline: "Kiezlabor-Toolkit",
       subtitle: "Stellen Sie sich eine grünere, autofreie Zukunft vor, basierend auf echten Mapillary-Bildern oder KI-Visionen.",
       reimagine: "Ihre Straße",
       yourStreet: "neu denken",
@@ -200,7 +200,7 @@ export default function App() {
       locationNotFound: "Es konnte keine nahegelegene Straße für deinen aktuellen Standort gefunden werden.",
       clearHistory: "Verlauf leeren",
       toolkit: "Transformations-Toolkit",
-      size: "Größe",
+      size: "Pinselgröße",
       presets: "Vorlagen",
       customCommand: "Eigener Befehl",
       placeholderEditor: "Beschreiben Sie die Änderung (z.B. 'Solarzellen hinzufügen', 'Pflanztag')...",
@@ -1183,10 +1183,6 @@ export default function App() {
                   className="absolute inset-0 w-1/3 bg-coral-500"
                 />
               </div>
-            </div>
-
-            <div className="mt-8 pt-8 border-t-2 border-eb-900/10 text-[10px] font-black text-eb-900/40">
-              {t.tagline} • BLOCK_GEN_V2
             </div>
           </motion.div>
         )}
