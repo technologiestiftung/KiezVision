@@ -155,13 +155,6 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
             className="absolute inset-0 w-full h-full object-cover pointer-events-none"
             draggable={false}
           />
-          <div className="absolute top-4 left-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none">
-            {labelBefore}
-          </div>
-        </div>
-
-        <div className="absolute top-4 right-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-10">
-          {labelAfter}
         </div>
 
         <div
@@ -182,6 +175,13 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
             <GripVertical className="text-gray-800 w-5 h-5" aria-hidden="true" />
           </div>
         </div>
+      </div>
+
+      <div className="absolute top-4 left-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-30">
+        {labelBefore}
+      </div>
+      <div className="absolute top-4 right-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-30">
+        {labelAfter}
       </div>
     </div>
   );
