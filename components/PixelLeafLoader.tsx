@@ -18,7 +18,7 @@ export const PixelLeafLoader = () => {
   ];
 
   return (
-    <div className="grid grid-cols-10 gap-0 w-48 h-48 mx-auto">
+    <div aria-hidden="true" className="grid grid-cols-10 gap-0 w-48 h-48 mx-auto">
       {leafGrid.flat().map((pixel, i) => {
         const x = i % 10;
         const y = Math.floor(i / 10);
