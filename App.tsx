@@ -6,7 +6,7 @@ import { PixelLeafLoader } from './components/PixelLeafLoader';
 import { 
   Upload, AlertCircle, Sparkles, Download, Building2, 
   History, RotateCcw, Search, MousePointer2, Paintbrush2, 
-  Sliders, Wand2, Camera, Library, Save, ArrowLeft, Trash2, FolderOpen, Eraser
+  Sliders, Wand2, Camera, Library, Save, ArrowLeft, Trash2, FolderOpen, Eraser, Lock
 } from 'lucide-react';
 import { BeforeAfterSlider } from './components/BeforeAfterSlider';
 import { InpaintCanvas } from './components/InpaintCanvas';
@@ -65,9 +65,67 @@ function BackToHomeNavButton({
   );
 }
 
+const SITE_PASSWORD = (process.env.SITE_PASSWORD ?? '').trim();
+
+function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (input === SITE_PASSWORD) {
+      sessionStorage.setItem('kv_auth', '1');
+      onUnlock();
+    } else {
+      setError(true);
+      setTimeout(() => setError(false), 1500);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-eb-50 flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-16 h-16 bg-white flex items-center justify-center border-4 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] mb-6">
+            <Lock className="w-8 h-8 text-eb-900" />
+          </div>
+          <h1 className="text-3xl font-black tracking-tighter text-eb-900">KiezVision</h1>
+          <p className="text-sm font-bold text-eb-900/50 mt-1">Enter password to continue</p>
+        </div>
+        <form onSubmit={handleSubmit} className="bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)] p-8">
+          <input
+            type="password"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Password"
+            autoFocus
+            className={`w-full bg-gray-50 border-2 h-14 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20 ${
+              error ? 'border-red-500 bg-red-50' : 'border-eb-900'
+            }`}
+          />
+          {error && (
+            <p className="text-red-600 text-xs font-black mt-2">Incorrect password</p>
+          )}
+          <button
+            type="submit"
+            className="w-full mt-4 bg-eb-900 text-eb-50 h-14 border-2 border-eb-900 font-black text-sm shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 transition-all"
+          >
+            Unlock
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
+
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    if (!SITE_PASSWORD) return true;
+    return sessionStorage.getItem('kv_auth') === '1';
+  });
 
   const normalizePath = (pathname: string) => {
     // Backwards-compat with the requested (typo) route.
@@ -1063,6 +1121,10 @@ export default function App() {
       }
     }
   }, []);
+
+  if (!isAuthenticated) {
+    return <PasswordGate onUnlock={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <div className="min-h-screen bg-eb-50 text-eb-900 font-sans selection:bg-eb-900 selection:text-eb-50">
