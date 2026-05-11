@@ -698,18 +698,53 @@ export default function App() {
   const handleSaveToLibrary = async () => {
     if (!currentImage) return;
     setError(null);
+    const promptText = history[0]?.prompt || 'Saved Image';
+    const ts = Date.now();
+
+    // Browsers without File System Access (e.g. Safari): keep the vision in the
+    // in-app Library only (localStorage + inline image). Disk copy is skipped.
+    if (!isFileSystemAccessSupported()) {
+      const id = `${ts}_${Math.random().toString(16).slice(2, 8)}`;
+      const entry: LibraryEntry = {
+        id,
+        prompt: promptText,
+        timestamp: ts,
+        folder: '',
+        filename: '',
+        thumbFilename: '',
+        dataUrl: currentImage,
+      };
+      setLibrary((prev) => [entry, ...prev]);
+      thumbLoadStatusRef.current[entry.id] = 'done';
+      setThumbCache((prev) => ({ ...prev, [entry.id]: currentImage }));
+      setLastExportedImage(currentImage);
+      navigate('/library');
+      return;
+    }
+
     try {
       const ready = await ensureLibraryFolder();
-      if (!ready) return;
-      const ts = Date.now();
+      if (!ready) {
+        setError(
+          language === 'en'
+            ? 'To save to the Library, allow folder access when prompted, or set a library folder on the Library page.'
+            : 'Zum Speichern in der Galerie bitte den Ordnerzugriff erlauben oder auf der Galerie-Seite einen Ordner wählen.'
+        );
+        return;
+      }
       const { entry } = await saveImageToLibrary({
         dataUrl: currentImage,
-        prompt: history[0]?.prompt || 'Saved Image',
+        prompt: promptText,
         timestamp: ts,
       });
       setLibrary((prev) => [entry, ...prev]);
+      const thumbUrl = await loadThumbnailObjectUrl(entry);
+      if (thumbUrl) {
+        thumbLoadStatusRef.current[entry.id] = 'done';
+        setThumbCache((prev) => (prev[entry.id] ? prev : { ...prev, [entry.id]: thumbUrl }));
+      }
       setLastExportedImage(currentImage);
-      alert(language === 'en' ? 'Saved to your library!' : 'In Ihrer Galerie gespeichert!');
+      navigate('/library');
     } catch (err: any) {
       if (err?.message === 'NO_LIBRARY_FOLDER') {
         setError(
@@ -894,13 +929,15 @@ export default function App() {
           
           mctx.drawImage(mask, 0, 0, maskCanvas.width, maskCanvas.height);
 
-          // Soft matte: brush = rough placement reference; smooth alpha + wide blur blends into full frame
+          // Matte from brush: steeper alpha than before so insertions do not look mushy at the boundary.
           const maskImageData = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
           const pixels = maskImageData.data;
+          const lo = 36;
+          const hi = 96;
           for (let i = 0; i < pixels.length; i += 4) {
             const lum = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
             const a =
-              lum < 22 ? 0 : lum > 118 ? 255 : Math.round(((lum - 22) / (118 - 22)) * 255);
+              lum < lo ? 0 : lum > hi ? 255 : Math.round(((lum - lo) / (hi - lo)) * 255);
             pixels[i + 3] = a;
             pixels[i] = 255;
             pixels[i + 1] = 255;
@@ -908,12 +945,13 @@ export default function App() {
           }
           mctx.putImageData(maskImageData, 0, 0);
 
+          // Light edge feather only (was up to ~48px blur — that smeared benches, racks, and fine detail).
           const blurredMaskCanvas = document.createElement('canvas');
           blurredMaskCanvas.width = maskCanvas.width;
           blurredMaskCanvas.height = maskCanvas.height;
           const bmctx = blurredMaskCanvas.getContext('2d');
           if (bmctx) {
-            const blurRadius = Math.max(6, Math.min(48, Math.round(original.width / 220)));
+            const blurRadius = Math.max(1, Math.min(5, Math.round(original.width / 900)));
             bmctx.filter = `blur(${blurRadius}px)`;
             bmctx.drawImage(maskCanvas, 0, 0);
             bmctx.filter = 'none';
@@ -997,8 +1035,8 @@ export default function App() {
       const aspectRatio = await getBestAspectRatio(currentImage);
       const finalPrompt = buildTransformPrompt(prompt, { editMode });
       const newImageDataRaw = await transformImage(
-        currentImage, 
-        prompt, 
+        currentImage,
+        finalPrompt,
         editMode === 'mask' ? maskForRun : null,
         highQuality,
         aspectRatio
@@ -1733,7 +1771,12 @@ export default function App() {
 
                 <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
                   <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.presets}</h3>
-                  <QuickActions onAction={handleTransform} disabled={processing.isProcessing} language={language} />
+                  <QuickActions
+                    onAction={handleTransform}
+                    disabled={processing.isProcessing}
+                    language={language}
+                    presetsBlocked={editMode === 'mask' && !maskBase64}
+                  />
                 </div>
                 
                 <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">

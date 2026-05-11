@@ -246,7 +246,7 @@ The next two parts are images in order:
 (1) REFERENCE PHOTO — full current scene to edit.
 (2) MASK — white ≈ where the change should focus; black ≈ keep original pixels (except soft blends at edges). The brush is a hint, not a strict crop.
 
-Return ONE full-frame image that fulfills PRIMARY EDIT REQUEST, integrated naturally in the whole photograph (lighting, perspective, scale). No text or watermarks.`,
+Return ONE full-frame image that fulfills PRIMARY EDIT REQUEST, integrated naturally in the whole photograph (lighting, perspective, scale). Respect the visible ground plane (sidewalk vs roadway), object footprint, and scale versus doors, curbs, and vehicles. No text or watermarks.`,
       },
       {
         inlineData: {
@@ -272,6 +272,7 @@ Return ONE full-frame image that fulfills PRIMARY EDIT REQUEST, integrated natur
       {
         text: `Transform this image based on: ${userPrompt}. 
       Maintain the original scene structure and especially the buildings. Do NOT change any architecture unless explicitly told to.
+      Ground any new elements on the correct surface (paving, asphalt, plaza) with believable size and perspective relative to doors, windows, curbs, and vehicles.
       CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
       },
     ];
@@ -279,10 +280,11 @@ Return ONE full-frame image that fulfills PRIMARY EDIT REQUEST, integrated natur
 
   return callWithRetry(async () => {
     const ai = getAiClient();
-    const model =
-      maskPrepared || highQuality
-        ? 'gemini-3.1-flash-image-preview'
-        : 'gemini-2.5-flash-image';
+    // Masked edits used to always pick the preview model (`mask || highQuality`),
+    // so turning "high quality" off still hit the slow path. Follow the HQ toggle only.
+    const model = highQuality
+      ? 'gemini-3.1-flash-image-preview'
+      : 'gemini-2.5-flash-image';
 
     const imageConfig = {
       aspectRatio,

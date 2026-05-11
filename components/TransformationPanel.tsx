@@ -10,18 +10,14 @@ interface TransformationPanelProps {
 }
 
 const SUGGESTIONS_EN = [
-  { label: '🪑 Bench', value: 'add a modern wooden park bench' },
   { label: '🌳 Tree', value: 'add a mature street tree with green foliage' },
-  { label: '🚲 Bike Rack', value: 'add a metal bicycle rack' },
   { label: '🌸 Planter', value: 'add a large ceramic pot with colorful flowers' },
   { label: '🗑️ Trash Can', value: 'add a sleek designer trash bin' },
   { label: '💡 Street Light', value: 'add a modern LED street lamp' },
 ];
 
 const SUGGESTIONS_DE = [
-  { label: '🪑 Bank', value: 'eine moderne parkbank aus holz hinzufügen' },
   { label: '🌳 Baum', value: 'einen ausgewachsenen straßenbaum mit grünem laub hinzufügen' },
-  { label: '🚲 Radständer', value: 'einen fahrradständer aus metall hinzufügen' },
   { label: '🌸 Pflanzkübel', value: 'einen großen keramiktopf mit bunten blumen hinzufügen' },
   { label: '🗑️ Mülleimer', value: 'einen modernen designer-mülleimer hinzufügen' },
   { label: '💡 Straßenlampe', value: 'eine moderne led-straßenlaterne hinzufügen' },

@@ -25,6 +25,8 @@ export enum TransformationType {
   ADD_WATER = 'Replace the street road with a clear blue water canal, creating a Venice-like urban waterway',
   REMOVE_CARS = 'Remove all cars, trucks, and vehicles from the street, making it a pedestrian-only zone with clean pavement',
   SUNNY_DAY = 'Make the scene bright and sunny with a clear blue sky, warm sunlight, and soft shadows, as if it is a beautiful summer afternoon',
+  ADD_BENCH = 'Add one or more realistic public park benches along the sidewalk or plaza, matching the local street style and materials',
+  ADD_BIKE_RACK = 'Add practical bicycle parking such as metal U-racks or staple racks on the sidewalk, spaced realistically for several bikes',
   CUSTOM = 'Custom'
 }
 
