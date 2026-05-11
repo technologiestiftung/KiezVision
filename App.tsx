@@ -39,8 +39,8 @@ declare global {
 }
 
 const BERLIN_DISTRICTS = [
-  "Mitte", "Friedrichshain", "Kreuzberg", "Prenzlauer Berg", 
-  "Neukölln", "Charlottenburg", "Schöneberg", "Wedding", "Moabit", "Tempelhof"
+  "Mitte", "Friedrichshain", "Kreuzberg", "Tempelhof", "Schöneberg", "Neukölln", "Pankow", "Charlottenburg", "Wilmersdorf",
+  "Spandau", "Steglitz", "Zehlendorf", "Treptow", "Köpenick", "Marzahn", "Hellersdorf", "Lichtenberg", "Reinickendorf"
 ];
 
 const kiezvisionLogoUrl = '/kiezvision_logo.png';
@@ -1397,7 +1397,7 @@ export default function App() {
             <div className="w-24 h-24 bg-white flex items-center justify-center mb-6 border-4 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] rotate-3 overflow-hidden">
               <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
             </div>
-            <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter leading-[0.9]">{t.reimagine}<br/>{t.yourStreet}</h2>
+            <h2 className="text-4xl md:text-5xl font-black mb-4 tracking-tighter leading-[0.9]">{t.reimagine}<br/>{t.yourStreet}</h2>
             <p className="text-eb-900/60 mb-6 max-w-2xl text-lg font-bold tracking-tight">{t.subtitle}</p>
             
             <div className="w-full space-y-8">
@@ -1427,7 +1427,7 @@ export default function App() {
 
                 <div className="mt-6 pt-6 border-t-2 border-eb-900/10">
                   <h3 className="text-xs font-black text-eb-900 mb-4">{t.exploreDistricts}</h3>
-                  <div className="flex flex-wrap justify-center gap-2">
+                  <div className="flex gap-2 overflow-x-auto">
                     {BERLIN_DISTRICTS.map(district => (
                       <button 
                         key={district}
