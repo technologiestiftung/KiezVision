@@ -90,21 +90,25 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
             <Lock className="w-8 h-8 text-eb-900" />
           </div>
           <h1 className="text-3xl font-black tracking-tighter text-eb-900">KiezVision</h1>
-          <p className="text-sm font-bold text-eb-900/50 mt-1">Enter password to continue</p>
+          <p className="text-sm font-bold text-eb-900/50 mt-1" id="password-hint">Enter password to continue</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)] p-8">
+          <label htmlFor="site-password" className="sr-only">Password</label>
           <input
+            id="site-password"
             type="password"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Password"
             autoFocus
-            className={`w-full bg-gray-50 border-2 h-14 px-6 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20 ${
+            aria-describedby="password-hint"
+            aria-invalid={error || undefined}
+            className={`w-full bg-gray-50 border-2 h-14 px-6 text-lg font-black tracking-tighter focus:bg-white transition-all placeholder:text-eb-900/30 ${
               error ? 'border-red-500 bg-red-50' : 'border-eb-900'
             }`}
           />
           {error && (
-            <p className="text-red-600 text-xs font-black mt-2">Incorrect password</p>
+            <p className="text-red-600 text-xs font-black mt-2" role="alert">Incorrect password</p>
           )}
           <button
             type="submit"
@@ -210,6 +214,23 @@ export default function App() {
       aiVision: "AI vision",
       takePhoto: "Take photo",
       cancelCamera: "Cancel",
+      errorQuotaExceeded: "AI Quota Exceeded. Please wait a moment and try again.",
+      errorPermissionDenied: "Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.",
+      errorFailedStreetImage: "Failed to generate street image.",
+      errorFailedTransform: "Failed to transform image",
+      errorSelectFolder: "Could not select folder.",
+      errorReconnectFolder: "Could not reconnect folder.",
+      sourceLabel: "Source",
+      sourcePhotographic: "Photographic",
+      sourceSynthetic: "Synthetic",
+      defaultLocation: "Berlin Standard View",
+      externalImageryView: "External Imagery View",
+      before: "BEFORE",
+      after: "AFTER",
+      beforeAfterComparison: "Before and after comparison",
+      drawingCanvasLabel: "Drawing canvas — use mouse or touch to paint the area you want to transform",
+      drawingCanvasRoleDescription: "drawing canvas",
+      errorFailedUpload: "Failed to process upload.",
     },
     de: {
       tagline: "Kiezlabor-Toolkit",
@@ -278,6 +299,23 @@ export default function App() {
       aiVision: "KI-Vision",
       takePhoto: "Foto aufnehmen",
       cancelCamera: "Abbrechen",
+      errorQuotaExceeded: "KI-Kontingent erschöpft. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
+      errorPermissionDenied: "Zugriff verweigert. Diese Funktion erfordert einen kostenpflichtigen API-Schlüssel. Bitte klicken Sie auf das Schlüsselsymbol in der Kopfzeile, um einen Schlüssel auszuwählen.",
+      errorFailedStreetImage: "Straßenbild konnte nicht generiert werden.",
+      errorFailedTransform: "Bild konnte nicht transformiert werden.",
+      errorSelectFolder: "Ordner konnte nicht ausgewählt werden.",
+      errorReconnectFolder: "Ordner konnte nicht erneut verbunden werden.",
+      sourceLabel: "Quelle",
+      sourcePhotographic: "Fotografisch",
+      sourceSynthetic: "Synthetisch",
+      defaultLocation: "Berlin Standardansicht",
+      externalImageryView: "Externe Bildansicht",
+      before: "VORHER",
+      after: "NACHHER",
+      beforeAfterComparison: "Vorher-Nachher-Vergleich",
+      drawingCanvasLabel: "Zeichenfläche — verwenden Sie Maus oder Touch, um den zu transformierenden Bereich zu markieren",
+      drawingCanvasRoleDescription: "Zeichenfläche",
+      errorFailedUpload: "Upload konnte nicht verarbeitet werden.",
     }
   }[language];
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -398,6 +436,8 @@ export default function App() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const cameraFileFallbackRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const leaveDialogRef = useRef<HTMLDivElement>(null);
+  const cameraModalRef = useRef<HTMLDivElement>(null);
 
   const stopCameraStream = useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -406,6 +446,41 @@ export default function App() {
       cameraVideoRef.current.srcObject = null;
     }
   }, []);
+
+  const trapFocus = useCallback((containerRef: React.RefObject<HTMLDivElement | null>) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const focusable = el.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length) focusable[0].focus();
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    el.addEventListener('keydown', handler);
+    return () => el.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!showLeaveEditorConfirm) return;
+    const cleanup = trapFocus(leaveDialogRef);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowLeaveEditorConfirm(false);
+        setPendingPathAfterLeaveConfirm(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { cleanup?.(); document.removeEventListener('keydown', onKey); };
+  }, [showLeaveEditorConfirm, trapFocus]);
 
   const loadImageIntoEditor = useCallback(
     (dataUrl: string, prompt: string) => {
@@ -482,6 +557,16 @@ export default function App() {
     setCameraOpen(false);
   }, [stopCameraStream]);
 
+  useEffect(() => {
+    if (!cameraOpen) return;
+    const cleanup = trapFocus(cameraModalRef);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeCamera();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { cleanup?.(); document.removeEventListener('keydown', onKey); };
+  }, [cameraOpen, trapFocus, closeCamera]);
+
   const capturePhotoFromVideo = useCallback(() => {
     const video = cameraVideoRef.current;
     if (!video || video.readyState < 2) return;
@@ -556,6 +641,10 @@ export default function App() {
   useEffect(() => {
     setIsAreaEditEraser(false);
   }, [inpaintMountKey]);
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   // On mount, detect the persisted library folder status without prompting.
   // We don't auto-prompt; the user re-grants permission via the "Reconnect"
@@ -660,7 +749,7 @@ export default function App() {
         const dataUrl = await readFileAsDataUrl(blob);
         loadImageIntoEditor(dataUrl, 'Original Upload');
       } catch (err: any) {
-        setError(err?.message || 'Failed to process upload.');
+        setError(err?.message || t.errorFailedUpload);
       } finally {
         setProcessing({ isProcessing: false });
       }
@@ -689,7 +778,7 @@ export default function App() {
       setSelectedGalleryId(entries[0]?.id ?? null);
       navigate('/image-gallery');
     } catch (err: any) {
-      setError(err?.message || 'Failed to process upload.');
+      setError(err?.message || t.errorFailedUpload);
       setProcessing({ isProcessing: false });
     } finally {
       setProcessing({ isProcessing: false });
@@ -731,9 +820,9 @@ export default function App() {
         setFolderStatus('connected');
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not select folder.');
+      setError(err?.message || t.errorSelectFolder);
     }
-  }, []);
+  }, [t.errorSelectFolder]);
 
   const handleReconnectLibraryFolder = useCallback(async () => {
     setError(null);
@@ -749,9 +838,9 @@ export default function App() {
         );
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not reconnect folder.');
+      setError(err?.message || t.errorReconnectFolder);
     }
-  }, [language]);
+  }, [language, t.errorReconnectFolder]);
 
   const handleSaveToLibrary = async () => {
     if (!currentImage) return;
@@ -945,14 +1034,14 @@ export default function App() {
                                JSON.stringify(err).includes("403");
       
       if (isQuotaError) {
-        setError("AI Quota Exceeded. Please wait a moment and try again.");
+        setError(t.errorQuotaExceeded);
       } else if (isPermissionError) {
-        setError("Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.");
+        setError(t.errorPermissionDenied);
         setHasApiKey(false);
       } else if (err.message?.includes("Real imagery not found")) {
         setError(err.message);
       } else {
-        setError(err.message || "Failed to generate street image.");
+        setError(err.message || t.errorFailedStreetImage);
       }
     } finally {
       setProcessing({ isProcessing: false });
@@ -1137,12 +1226,12 @@ export default function App() {
                                JSON.stringify(err).includes("403");
 
       if (isQuotaError) {
-        setError("AI Quota Exceeded. Please wait a moment and try again.");
+        setError(t.errorQuotaExceeded);
       } else if (isPermissionError) {
-        setError("Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.");
+        setError(t.errorPermissionDenied);
         setHasApiKey(false);
       } else {
-        setError(err.message || "Failed to transform image");
+        setError(err.message || t.errorFailedTransform);
       }
       throw err instanceof Error ? err : new Error(String(err));
     } finally {
@@ -1166,36 +1255,41 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-eb-50 text-eb-900 font-sans selection:bg-eb-900 selection:text-eb-50">
+      <a href="#main-content" className="skip-link">
+        {language === 'en' ? 'Skip to main content' : 'Zum Hauptinhalt springen'}
+      </a>
       <header className="border-b-2 border-eb-900 bg-tsb sticky top-0 z-50">
-        <div className="w-full px-6 py-4 flex items-center justify-between gap-4">
+        <nav aria-label={language === 'en' ? 'Main navigation' : 'Hauptnavigation'} className="w-full px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => requestLeaveEditor('/')} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
-              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="KiezVision Logo" />
+            <button onClick={() => requestLeaveEditor('/')} aria-label={language === 'en' ? 'Go to homepage' : 'Zur Startseite'} className="bg-eb-50 p-0 h-10 w-10 flex items-center justify-center border-2 border-eb-900 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all overflow-hidden">
+              <img src={kiezvisionLogoUrl} className="w-full h-full object-cover" alt="" aria-hidden="true" />
             </button>
             <div>
               <h1 className="text-2xl font-black tracking-tighter leading-none mb-1 text-eb-50">KiezVision</h1>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black bg-coral-100 text-eb-900 px-2 py-0.5">{t.tagline}</span>
+                <span className="text-xs font-black bg-coral-100 text-eb-900 px-2 py-0.5">{t.tagline}</span>
               </div>
             </div>
           </div>
           
           {view === 'editor' && originalImage && (
-            <div className="flex items-center gap-2 bg-eb-50/15 p-1 border-2 border-eb-50/40 h-12">
+            <div role="group" aria-label={language === 'en' ? 'Edit mode' : 'Bearbeitungsmodus'} className="flex items-center gap-2 bg-eb-50/15 p-1 border-2 border-eb-50/40 h-12">
               <button 
-                onClick={() => setEditMode('comparison')} 
+                onClick={() => setEditMode('comparison')}
+                aria-pressed={editMode === 'comparison'}
                 className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'comparison' ? 'bg-coral-100 text-eb-900' : 'text-eb-50 hover:bg-white/10'}`}
               >
-                <MousePointer2 className="w-4 h-4" /> {t.compare}
+                <MousePointer2 className="w-4 h-4" aria-hidden="true" /> {t.compare}
               </button>
               <button 
                 onClick={() => {
                   setInpaintMountKey((k) => k + 1);
                   setEditMode('mask');
                 }}
+                aria-pressed={editMode === 'mask'}
                 className={`flex items-center gap-2 px-6 h-full text-xs font-black transition-all ${editMode === 'mask' ? 'bg-coral-100 text-eb-900' : 'text-eb-50 hover:bg-white/10'}`}
               >
-                <Paintbrush2 className="w-4 h-4" /> {t.areaEdit}
+                <Paintbrush2 className="w-4 h-4" aria-hidden="true" /> {t.areaEdit}
               </button>
             </div>
           )}
@@ -1203,18 +1297,21 @@ export default function App() {
           <div className="flex items-center gap-4 h-10">
             <button 
               onClick={() => requestLeaveEditor('/library')}
+              aria-current={view === 'library' ? 'page' : undefined}
               className={`flex items-center gap-2 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === 'library' ? 'bg-eb-900 text-eb-50' : 'bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]'}`}
             >
-              <Library className="w-4 h-4" /> <span className="hidden md:inline">{t.library}</span>
+              <Library className="w-4 h-4" aria-hidden="true" /> <span className="hidden md:inline">{t.library}</span>
+              <span className="sr-only md:hidden">{t.library}</span>
             </button>
 
             {view === 'editor' && currentImage && (
               <div className="flex items-center gap-2 h-full">
                 <button 
-                  onClick={handleSaveToLibrary} 
+                  onClick={handleSaveToLibrary}
+                  aria-label={language === 'en' ? 'Save to library' : 'In Galerie speichern'}
                   className="bg-eb-900 text-eb-50 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 flex items-center gap-2"
                 >
-                  <Save className="w-4 h-4" /> <span className="hidden lg:inline">{t.save}</span>
+                  <Save className="w-4 h-4" aria-hidden="true" /> <span className="hidden lg:inline">{t.save}</span>
                 </button>
                 <button 
                   onClick={() => {
@@ -1226,42 +1323,50 @@ export default function App() {
                     a.download = filename;
                     a.click();
                     setLastExportedImage(currentImage);
-                  }} 
+                  }}
+                  aria-label={language === 'en' ? 'Download image' : 'Bild herunterladen'}
                   className="bg-eb-900 text-eb-50 px-4 h-full border-2 border-eb-900 text-xs font-black transition-all hover:bg-coral-500 flex items-center justify-center"
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
             )}
 
-            <div className="flex items-center border-2 border-eb-900 bg-eb-50 overflow-hidden shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] h-full">
+            <div role="group" aria-label={language === 'en' ? 'Language' : 'Sprache'} className="flex items-center border-2 border-eb-900 bg-eb-50 overflow-hidden shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] h-full">
               <button 
                 onClick={() => setLanguage('en')}
-                className={`px-3 h-full text-[10px] font-black transition-all ${language === 'en' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'}`}
+                aria-pressed={language === 'en'}
+                aria-label="English"
+                className={`px-3 h-full text-xs font-black transition-all ${language === 'en' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'}`}
               >
                 EN
               </button>
               <button 
                 onClick={() => setLanguage('de')}
-                className={`px-3 h-full text-[10px] font-black transition-all border-l-2 border-eb-900 ${language === 'de' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'}`}
+                aria-pressed={language === 'de'}
+                aria-label="Deutsch"
+                className={`px-3 h-full text-xs font-black transition-all border-l-2 border-eb-900 ${language === 'de' ? 'bg-eb-900 text-eb-50' : 'text-eb-900 hover:bg-coral-100'}`}
               >
                 DE
               </button>
             </div>
           </div>
-        </div>
+        </nav>
       </header>
 
-      <main className="w-full p-0 relative">
+      <main id="main-content" className="w-full p-0 relative">
+        <div aria-live="polite" aria-atomic="true" className="sr-only">
+          {processing.isProcessing ? processing.statusMessage : ''}
+        </div>
         {processing.isProcessing && view !== 'editor' && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            role="status"
             className="fixed inset-0 z-[100] bg-eb-50 flex flex-col items-center justify-center text-center p-8 overflow-hidden"
           >
-            {/* Pixel Leaf animation drawing */}
-            <div className="flex items-center justify-center mb-12 scale-125">
+            <div className="flex items-center justify-center mb-12 scale-125" aria-hidden="true">
               <PixelLeafLoader />
             </div>
 
@@ -1302,14 +1407,15 @@ export default function App() {
                     type="button"
                     onClick={handleAutoDetect}
                     disabled={processing.isProcessing}
-                    className="px-4 h-10 text-[10px] font-black transition-all border-2 border-eb-900 bg-eb-900 text-eb-50 shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 h-10 text-xs font-black transition-all border-2 border-eb-900 bg-eb-900 text-eb-50 shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {t.autoDetect}
                   </button>
                 </div>
 
                 <form onSubmit={(e) => { e.preventDefault(); handleSearch(searchQuery); }} className="relative">
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 pr-28 text-lg font-black tracking-tighter focus:bg-white outline-none transition-all placeholder:text-eb-900/20" disabled={processing.isProcessing} />
+                  <label htmlFor="street-search" className="sr-only">{language === 'en' ? 'Search for a street' : 'Nach einer Straße suchen'}</label>
+                  <input id="street-search" type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t.searchPlaceholder} className="w-full bg-gray-50 border-2 border-eb-900 h-16 px-6 pr-28 text-lg font-black tracking-tighter focus:bg-white transition-all placeholder:text-eb-900/40" disabled={processing.isProcessing} />
                   <button
                     type="submit"
                     disabled={!searchQuery.trim() || processing.isProcessing}
@@ -1320,13 +1426,13 @@ export default function App() {
                 </form>
 
                 <div className="mt-6 pt-6 border-t-2 border-eb-900/10">
-                  <h3 className="text-[9px] font-black text-eb-900 mb-4">{t.exploreDistricts}</h3>
+                  <h3 className="text-xs font-black text-eb-900 mb-4">{t.exploreDistricts}</h3>
                   <div className="flex flex-wrap justify-center gap-2">
                     {BERLIN_DISTRICTS.map(district => (
                       <button 
                         key={district}
                         onClick={() => handleSearch(district)}
-                        className="px-3 h-9 border-2 border-eb-900 bg-white text-[10px] font-black hover:bg-eb-900 hover:text-eb-50 transition-all shadow-[2px_2px_0px_0px_rgba(32,32,27,0.1)] hover:shadow-none"
+                        className="px-3 h-10 border-2 border-eb-900 bg-white text-xs font-black hover:bg-eb-900 hover:text-eb-50 transition-all shadow-[2px_2px_0px_0px_rgba(32,32,27,0.1)] hover:shadow-none"
                       >
                         {district}
                       </button>
@@ -1371,13 +1477,13 @@ export default function App() {
                 <h2 className="text-6xl font-black tracking-tighter leading-none">{t.imageLibrary}</h2>
               </div>
               {folderStatus === 'unsupported' ? (
-                <div className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-white text-eb-900 text-[10px] font-black max-w-md">
+                <div className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-white text-eb-900 text-xs font-black max-w-md">
                   <AlertCircle className="w-4 h-4" /> {t.browserUnsupportedFolder}
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
                   <div
-                    className={`flex items-center gap-2 px-4 h-10 border-2 border-eb-900 text-[10px] font-black ${
+                    className={`flex items-center gap-2 px-4 h-10 border-2 border-eb-900 text-xs font-black ${
                       folderStatus === 'connected'
                         ? 'bg-coral-100 text-eb-900'
                         : folderStatus === 'needs-permission'
@@ -1399,7 +1505,7 @@ export default function App() {
                   {folderStatus === 'needs-permission' ? (
                     <button
                       onClick={handleReconnectLibraryFolder}
-                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-xs font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
                     >
                       <FolderOpen className="w-4 h-4" />
                       {t.reconnectLibraryFolder}
@@ -1407,7 +1513,7 @@ export default function App() {
                   ) : (
                     <button
                       onClick={handleChooseLibraryFolder}
-                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                      className="flex items-center gap-2 px-4 h-10 border-2 border-eb-900 bg-eb-900 text-eb-50 text-xs font-black shadow-[4px_4px_0px_0px_rgba(255,207,214,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
                     >
                       <FolderOpen className="w-4 h-4" />
                       {folderStatus === 'connected' ? t.changeLibraryFolder : t.chooseLibraryFolder}
@@ -1488,7 +1594,7 @@ export default function App() {
                       <div className="border-2 border-eb-900 bg-white px-4 py-2 text-xs font-black tracking-tight">
                         {formatDateHeader(dateKey)}
                       </div>
-                      <div className="text-[10px] font-black text-eb-900/40 uppercase tracking-widest">
+                      <div className="text-xs font-black text-eb-900/60 uppercase tracking-widest">
                         {entries.length} {entries.length === 1 ? t.visionCountSingular : t.visionsCount}
                       </div>
                       <div className="h-0.5 flex-1 bg-eb-900/10" />
@@ -1549,7 +1655,7 @@ export default function App() {
                           )}
                         </div>
                         <div className="p-8">
-                          <p className="text-[10px] font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
+                          <p className="text-xs font-black mb-6 border-l-4 border-eb-900 pl-4 leading-relaxed">{item.prompt}</p>
                           <div className="flex items-center gap-4">
                             <button
                               onClick={(e) => {
@@ -1566,9 +1672,9 @@ export default function App() {
                                 void handleDownload();
                               }}
                               className="h-14 w-14 flex items-center justify-center bg-eb-900 text-eb-50 border-2 border-eb-900 hover:bg-coral-100 hover:text-eb-900 transition-all"
-                              title={language === 'en' ? 'Download' : 'Herunterladen'}
+                              aria-label={language === 'en' ? 'Download image' : 'Bild herunterladen'}
                             >
-                              <Download className="w-5 h-5" />
+                              <Download className="w-5 h-5" aria-hidden="true" />
                             </button>
                             <button
                               onClick={(e) => {
@@ -1576,9 +1682,9 @@ export default function App() {
                                 void removeFromLibrary(item.id);
                               }}
                               className="h-14 w-14 flex items-center justify-center bg-red-600 text-eb-50 border-2 border-eb-900 hover:bg-eb-900 transition-all"
-                              title={language === 'en' ? 'Delete' : 'Löschen'}
+                              aria-label={language === 'en' ? 'Delete vision' : 'Vision löschen'}
                             >
-                              <Trash2 className="w-5 h-5" />
+                              <Trash2 className="w-5 h-5" aria-hidden="true" />
                             </button>
                           </div>
                         </div>
@@ -1617,7 +1723,7 @@ export default function App() {
                 {/* Thumbnail Rail */}
                 <div className="col-span-12 lg:col-span-3 min-h-0 overflow-hidden">
                   <div className="bg-white border-2 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] overflow-hidden h-full flex flex-col min-h-0">
-                    <div className="bg-tsb text-eb-50 px-4 py-2 text-[10px] font-black">
+                    <div className="bg-tsb text-eb-50 px-4 py-2 text-xs font-black">
                       {language === 'en' ? 'Uploaded images' : 'Hochgeladene Bilder'} • {uploadedGallery.length}
                     </div>
                     <div className="overflow-y-auto custom-scrollbar p-4 flex flex-col gap-5 flex-1 min-h-0">
@@ -1645,7 +1751,7 @@ export default function App() {
                       <div className="bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)] overflow-hidden h-full flex flex-col min-h-0">
                         <div className="flex items-center justify-between gap-4 border-b-4 border-eb-900 p-5 bg-kv-chrome">
                           <div className="min-w-0">
-                            <div className="text-[10px] font-black text-eb-900/60 uppercase tracking-widest">
+                            <div className="text-xs font-black text-eb-900/70 uppercase tracking-widest">
                               {language === 'en' ? 'Selected' : 'Ausgewählt'}
                             </div>
                             <div className="text-lg md:text-xl font-black tracking-tighter truncate">
@@ -1682,9 +1788,11 @@ export default function App() {
                    <motion.div 
                      initial={{ opacity: 0 }}
                      animate={{ opacity: 1 }}
+                     role="status"
+                     aria-label={processing.statusMessage}
                      className="absolute inset-0 z-40 bg-eb-50 flex flex-col items-center justify-center text-center p-8"
                    >
-                     <div className="flex items-center justify-center mb-6 scale-75">
+                     <div className="flex items-center justify-center mb-6 scale-75" aria-hidden="true">
                         <PixelLeafLoader />
                      </div>
                      <div className="text-eb-900 px-4 py-2 text-lg font-black tracking-tighter mb-2 italic uppercase">
@@ -1709,11 +1817,16 @@ export default function App() {
                         onOverlayChange={handleOverlayChange}
                         brushSize={brushSize}
                         isEraser={isAreaEditEraser}
+                        ariaLabel={t.drawingCanvasLabel}
+                        ariaRoleDescription={t.drawingCanvasRoleDescription}
                     />
                   ) : (
                     <BeforeAfterSlider 
                         originalImage={originalImage!} 
-                        modifiedImage={currentImage || originalImage!} 
+                        modifiedImage={currentImage || originalImage!}
+                        labelBefore={t.before}
+                        labelAfter={t.after}
+                        ariaLabelSlider={t.beforeAfterComparison}
                     />
                   )}
                  </div>
@@ -1721,12 +1834,12 @@ export default function App() {
                  {imageSource && !processing.isProcessing && (
                    <div className="absolute bottom-10 left-10 z-30 flex flex-col gap-2">
                      <div className="flex flex-col gap-0 border-2 border-eb-900 bg-white shadow-[6px_6px_0px_0px_rgba(32,32,27,1)]">
-                       <div className="bg-tsb text-eb-50 px-3 py-1 text-[10px] font-black">
-                         Source: {imageSource.includes('Mapillary') ? 'Photographic' : 'Synthetic'}
+                       <div className="bg-tsb text-eb-50 px-3 py-1 text-xs font-black">
+                         {t.sourceLabel}: {imageSource.includes('Mapillary') ? t.sourcePhotographic : t.sourceSynthetic}
                        </div>
                        <div className="px-4 py-2">
                          <span className="text-xs font-black tracking-tighter">
-                           {fetchedLocation || searchQuery || "Berlin Standard View"}
+                           {fetchedLocation || searchQuery || t.defaultLocation}
                          </span>
                        </div>
                      </div>
@@ -1736,9 +1849,9 @@ export default function App() {
                            href={mapillaryMetadata.link} 
                            target="_blank" 
                            rel="noreferrer" 
-                           className="flex items-center gap-2 bg-coral-100 border-2 border-eb-900 px-4 py-2 text-[10px] font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all w-fit"
+                           className="flex items-center gap-2 bg-coral-100 border-2 border-eb-900 px-4 py-2 text-xs font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all w-fit"
                          >
-                           External Imagery View
+                           {t.externalImageryView}
                          </a>
                        </div>
                      )}
@@ -1749,10 +1862,10 @@ export default function App() {
               {/* Version History Footer Slider */}
               <div className="bg-white border-t-2 border-eb-900 p-6">
                 <div className="flex items-center justify-between mb-4">
-                   <h3 className="text-[11px] font-black flex items-center gap-2">
-                     <History className="w-4 h-4" /> {t.iterations}
+                   <h3 className="text-xs font-black flex items-center gap-2">
+                     <History className="w-4 h-4" aria-hidden="true" /> {t.iterations}
                    </h3>
-                   <button onClick={() => { if(confirm(language === 'en' ? "Discard project?" : "Projekt verwerfen?")) window.location.reload(); }} className="text-[10px] font-black text-red-600 hover:text-red-700 transition-all">
+                   <button onClick={() => { if(confirm(language === 'en' ? "Discard project?" : "Projekt verwerfen?")) window.location.reload(); }} className="text-xs font-black text-red-600 hover:text-red-700 transition-all">
                      {t.clearHistory}
                    </button>
                 </div>
@@ -1763,7 +1876,7 @@ export default function App() {
                          <img src={img.dataUrl} className="w-full h-full object-cover" alt={`V${history.length - idx}`} />
                        </div>
                        <div className="p-2 bg-white border-t-2 border-eb-900">
-                          <p className={`text-[9px] font-black truncate leading-none ${currentImage === img.dataUrl ? 'text-eb-50' : 'text-eb-900'}`}>IDX_{history.length - idx} • {img.prompt}</p>
+                          <p className={`text-xs font-black truncate leading-none ${currentImage === img.dataUrl ? 'text-eb-50' : 'text-eb-900'}`}>IDX_{history.length - idx} • {img.prompt}</p>
                        </div>
                     </button>
                   ))}
@@ -1787,12 +1900,18 @@ export default function App() {
                         <h4 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.size}</h4>
                         <span className="font-mono text-xs bg-eb-900 text-eb-50 px-2 py-0.5">{brushSize}PX</span>
                       </div>
+                      <label htmlFor="brush-size" className="sr-only">{t.size}</label>
                       <input
+                        id="brush-size"
                         type="range"
                         min="10"
                         max="150"
                         value={brushSize}
                         onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                        aria-valuemin={10}
+                        aria-valuemax={150}
+                        aria-valuenow={brushSize}
+                        aria-valuetext={`${brushSize} pixels`}
                         className="w-full h-6 accent-eb-900 appearance-none bg-gray-100 border border-eb-900 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-eb-900 [&::-webkit-slider-thumb]:rounded-none mb-6"
                       />
                       <div className="flex items-center gap-2 mb-4">
@@ -1824,7 +1943,7 @@ export default function App() {
                       >
                         <RotateCcw className="w-4 h-4" aria-hidden /> {t.clearMask}
                       </button>
-                      <p className="text-[10px] font-bold text-eb-900 tracking-tight leading-snug border-t border-eb-900/15 pt-4">
+                      <p className="text-xs font-bold text-eb-900 tracking-tight leading-snug border-t border-eb-900/15 pt-4">
                         <span className="text-coral-500 font-black block mb-1">{t.areaEditTipTitle}</span>
                         {t.areaEditTipBody}
                       </p>
@@ -1853,7 +1972,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="mt-12 text-[9px] font-black text-eb-900/50 border-t border-eb-900/20 pt-4 text-center">
+              <div className="mt-12 text-xs font-black text-eb-900/70 border-t border-eb-900/20 pt-4 text-center">
                 {t.tagline}
               </div>
             </div>
@@ -1864,9 +1983,13 @@ export default function App() {
       <AnimatePresence>
         {cameraOpen && (
           <motion.div
+            ref={cameraModalRef}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={language === 'en' ? 'Camera capture' : 'Kameraaufnahme'}
             className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-eb-900/92 backdrop-blur-sm p-4"
           >
             <video
@@ -1905,15 +2028,17 @@ export default function App() {
             className="fixed inset-0 z-[250] flex items-center justify-center bg-eb-900/70 backdrop-blur-sm p-6"
           >
             <motion.div
+              ref={leaveDialogRef}
               initial={{ y: 12, scale: 0.98, opacity: 0 }}
               animate={{ y: 0, scale: 1, opacity: 1 }}
               exit={{ y: 12, scale: 0.98, opacity: 0 }}
               className="w-full max-w-lg bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(255,207,214,1)]"
               role="dialog"
               aria-modal="true"
+              aria-labelledby="leave-dialog-title"
             >
               <div className="border-b-4 border-eb-900 bg-kv-chrome px-6 py-4">
-                <h3 className="text-xl font-black tracking-tighter">
+                <h3 id="leave-dialog-title" className="text-xl font-black tracking-tighter">
                   {language === 'en' ? 'Leave editor?' : 'Editor verlassen?'}
                 </h3>
               </div>
@@ -1954,13 +2079,15 @@ export default function App() {
       </AnimatePresence>
       
       {error && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-900/95 text-red-100 px-8 py-4 rounded-2xl border border-red-700 backdrop-blur-xl flex flex-col sm:flex-row items-center gap-4 animate-in slide-in-from-bottom-4 shadow-2xl z-[100] max-w-[90vw]">
+        <div role="alert" className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-900/95 text-red-100 px-8 py-4 rounded-2xl border border-red-700 backdrop-blur-xl flex flex-col sm:flex-row items-center gap-4 animate-in slide-in-from-bottom-4 shadow-2xl z-[100] max-w-[90vw]">
           <div className="flex items-center gap-4">
-            <AlertCircle className="w-5 h-5 text-red-300 flex-shrink-0" />
+            <AlertCircle className="w-5 h-5 text-red-300 flex-shrink-0" aria-hidden="true" />
             <p className="text-sm font-bold tracking-tight">{error}</p>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setError(null)} className="text-eb-50 hover:bg-white/10 p-2 rounded-full transition-colors">✕</button>
+            <button onClick={() => setError(null)} aria-label={language === 'en' ? 'Dismiss error' : 'Fehler schließen'} className="text-eb-50 hover:bg-white/10 p-2 rounded-full transition-colors">
+              <span aria-hidden="true">✕</span>
+            </button>
           </div>
         </div>
       )}
