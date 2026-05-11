@@ -5,6 +5,9 @@ interface BeforeAfterSliderProps {
   originalImage: string;
   modifiedImage: string;
   className?: string;
+  labelBefore?: string;
+  labelAfter?: string;
+  ariaLabelSlider?: string;
 }
 
 /** Same cover logic as InpaintCanvas — image fills container; overflow cropped center. */
@@ -25,6 +28,9 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
   originalImage,
   modifiedImage,
   className = '',
+  labelBefore = 'BEFORE',
+  labelAfter = 'AFTER',
+  ariaLabelSlider = 'Before and after comparison',
 }) => {
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
@@ -150,18 +156,18 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
             draggable={false}
           />
           <div className="absolute top-4 left-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none">
-            BEFORE
+            {labelBefore}
           </div>
         </div>
 
         <div className="absolute top-4 right-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-10">
-          AFTER
+          {labelAfter}
         </div>
 
         <div
           role="slider"
           tabIndex={0}
-          aria-label="Before and after comparison"
+          aria-label={ariaLabelSlider}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(sliderPosition)}

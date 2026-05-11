@@ -4,6 +4,8 @@ interface InpaintCanvasProps {
   onOverlayChange: (data: { mask?: string } | null) => void;
   brushSize: number;
   isEraser: boolean;
+  ariaLabel?: string;
+  ariaRoleDescription?: string;
 }
 
 const COLORS = [
@@ -13,7 +15,7 @@ const COLORS = [
 export const InpaintCanvas = forwardRef<
   { clear: () => void; getMaskDataUrl: () => string | null },
   InpaintCanvasProps
->(({ image, onOverlayChange, brushSize, isEraser }, ref) => {
+>(({ image, onOverlayChange, brushSize, isEraser, ariaLabel, ariaRoleDescription }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -252,8 +254,8 @@ export const InpaintCanvas = forwardRef<
     <div 
       ref={containerRef}
       role="application"
-      aria-label="Drawing canvas — use mouse or touch to paint the area you want to transform"
-      aria-roledescription="drawing canvas"
+      aria-label={ariaLabel ?? "Drawing canvas — use mouse or touch to paint the area you want to transform"}
+      aria-roledescription={ariaRoleDescription ?? "drawing canvas"}
       className="absolute inset-0 w-full h-full min-h-0 bg-kv-chrome flex items-center justify-center overflow-hidden cursor-none"
       onMouseMove={(e) => {
         const { clientX, clientY } = e;

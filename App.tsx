@@ -214,6 +214,23 @@ export default function App() {
       aiVision: "AI vision",
       takePhoto: "Take photo",
       cancelCamera: "Cancel",
+      errorQuotaExceeded: "AI Quota Exceeded. Please wait a moment and try again.",
+      errorPermissionDenied: "Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.",
+      errorFailedStreetImage: "Failed to generate street image.",
+      errorFailedTransform: "Failed to transform image",
+      errorSelectFolder: "Could not select folder.",
+      errorReconnectFolder: "Could not reconnect folder.",
+      sourceLabel: "Source",
+      sourcePhotographic: "Photographic",
+      sourceSynthetic: "Synthetic",
+      defaultLocation: "Berlin Standard View",
+      externalImageryView: "External Imagery View",
+      before: "BEFORE",
+      after: "AFTER",
+      beforeAfterComparison: "Before and after comparison",
+      drawingCanvasLabel: "Drawing canvas — use mouse or touch to paint the area you want to transform",
+      drawingCanvasRoleDescription: "drawing canvas",
+      errorFailedUpload: "Failed to process upload.",
     },
     de: {
       tagline: "Kiezlabor-Toolkit",
@@ -282,6 +299,23 @@ export default function App() {
       aiVision: "KI-Vision",
       takePhoto: "Foto aufnehmen",
       cancelCamera: "Abbrechen",
+      errorQuotaExceeded: "KI-Kontingent erschöpft. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
+      errorPermissionDenied: "Zugriff verweigert. Diese Funktion erfordert einen kostenpflichtigen API-Schlüssel. Bitte klicken Sie auf das Schlüsselsymbol in der Kopfzeile, um einen Schlüssel auszuwählen.",
+      errorFailedStreetImage: "Straßenbild konnte nicht generiert werden.",
+      errorFailedTransform: "Bild konnte nicht transformiert werden.",
+      errorSelectFolder: "Ordner konnte nicht ausgewählt werden.",
+      errorReconnectFolder: "Ordner konnte nicht erneut verbunden werden.",
+      sourceLabel: "Quelle",
+      sourcePhotographic: "Fotografisch",
+      sourceSynthetic: "Synthetisch",
+      defaultLocation: "Berlin Standardansicht",
+      externalImageryView: "Externe Bildansicht",
+      before: "VORHER",
+      after: "NACHHER",
+      beforeAfterComparison: "Vorher-Nachher-Vergleich",
+      drawingCanvasLabel: "Zeichenfläche — verwenden Sie Maus oder Touch, um den zu transformierenden Bereich zu markieren",
+      drawingCanvasRoleDescription: "Zeichenfläche",
+      errorFailedUpload: "Upload konnte nicht verarbeitet werden.",
     }
   }[language];
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -715,7 +749,7 @@ export default function App() {
         const dataUrl = await readFileAsDataUrl(blob);
         loadImageIntoEditor(dataUrl, 'Original Upload');
       } catch (err: any) {
-        setError(err?.message || 'Failed to process upload.');
+        setError(err?.message || t.errorFailedUpload);
       } finally {
         setProcessing({ isProcessing: false });
       }
@@ -744,7 +778,7 @@ export default function App() {
       setSelectedGalleryId(entries[0]?.id ?? null);
       navigate('/image-gallery');
     } catch (err: any) {
-      setError(err?.message || 'Failed to process upload.');
+      setError(err?.message || t.errorFailedUpload);
       setProcessing({ isProcessing: false });
     } finally {
       setProcessing({ isProcessing: false });
@@ -786,9 +820,9 @@ export default function App() {
         setFolderStatus('connected');
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not select folder.');
+      setError(err?.message || t.errorSelectFolder);
     }
-  }, []);
+  }, [t.errorSelectFolder]);
 
   const handleReconnectLibraryFolder = useCallback(async () => {
     setError(null);
@@ -804,9 +838,9 @@ export default function App() {
         );
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not reconnect folder.');
+      setError(err?.message || t.errorReconnectFolder);
     }
-  }, [language]);
+  }, [language, t.errorReconnectFolder]);
 
   const handleSaveToLibrary = async () => {
     if (!currentImage) return;
@@ -1000,14 +1034,14 @@ export default function App() {
                                JSON.stringify(err).includes("403");
       
       if (isQuotaError) {
-        setError("AI Quota Exceeded. Please wait a moment and try again.");
+        setError(t.errorQuotaExceeded);
       } else if (isPermissionError) {
-        setError("Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.");
+        setError(t.errorPermissionDenied);
         setHasApiKey(false);
       } else if (err.message?.includes("Real imagery not found")) {
         setError(err.message);
       } else {
-        setError(err.message || "Failed to generate street image.");
+        setError(err.message || t.errorFailedStreetImage);
       }
     } finally {
       setProcessing({ isProcessing: false });
@@ -1192,12 +1226,12 @@ export default function App() {
                                JSON.stringify(err).includes("403");
 
       if (isQuotaError) {
-        setError("AI Quota Exceeded. Please wait a moment and try again.");
+        setError(t.errorQuotaExceeded);
       } else if (isPermissionError) {
-        setError("Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.");
+        setError(t.errorPermissionDenied);
         setHasApiKey(false);
       } else {
-        setError(err.message || "Failed to transform image");
+        setError(err.message || t.errorFailedTransform);
       }
       throw err instanceof Error ? err : new Error(String(err));
     } finally {
@@ -1783,11 +1817,16 @@ export default function App() {
                         onOverlayChange={handleOverlayChange}
                         brushSize={brushSize}
                         isEraser={isAreaEditEraser}
+                        ariaLabel={t.drawingCanvasLabel}
+                        ariaRoleDescription={t.drawingCanvasRoleDescription}
                     />
                   ) : (
                     <BeforeAfterSlider 
                         originalImage={originalImage!} 
-                        modifiedImage={currentImage || originalImage!} 
+                        modifiedImage={currentImage || originalImage!}
+                        labelBefore={t.before}
+                        labelAfter={t.after}
+                        ariaLabelSlider={t.beforeAfterComparison}
                     />
                   )}
                  </div>
@@ -1796,11 +1835,11 @@ export default function App() {
                    <div className="absolute bottom-10 left-10 z-30 flex flex-col gap-2">
                      <div className="flex flex-col gap-0 border-2 border-eb-900 bg-white shadow-[6px_6px_0px_0px_rgba(32,32,27,1)]">
                        <div className="bg-tsb text-eb-50 px-3 py-1 text-xs font-black">
-                         Source: {imageSource.includes('Mapillary') ? 'Photographic' : 'Synthetic'}
+                         {t.sourceLabel}: {imageSource.includes('Mapillary') ? t.sourcePhotographic : t.sourceSynthetic}
                        </div>
                        <div className="px-4 py-2">
                          <span className="text-xs font-black tracking-tighter">
-                           {fetchedLocation || searchQuery || "Berlin Standard View"}
+                           {fetchedLocation || searchQuery || t.defaultLocation}
                          </span>
                        </div>
                      </div>
@@ -1812,7 +1851,7 @@ export default function App() {
                            rel="noreferrer" 
                            className="flex items-center gap-2 bg-coral-100 border-2 border-eb-900 px-4 py-2 text-xs font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all w-fit"
                          >
-                           External Imagery View
+                           {t.externalImageryView}
                          </a>
                        </div>
                      )}
