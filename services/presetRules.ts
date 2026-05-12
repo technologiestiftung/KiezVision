@@ -6,6 +6,26 @@ type EditMode = 'comparison' | 'mask';
  * Geometry and placement cues for street scenes — used in full-image mode (via globals)
  * and appended in mask mode so area edits still respect ground plane and scale.
  */
+/** Mask mode: black map = copy reference exactly — no edits, props, or relighting there. */
+export const MASK_BLACK_UNCHANGED =
+  'Far from the brush, black on the location map means leave that part of the scene identical to the reference: no new objects, relighting, or global “improvements” there.';
+
+/** Allow the visible edit to extend slightly past the stroke so objects are not chopped at the mask edge. */
+export const MASK_EDGE_COMPLETION =
+  'The white brush marks minimum intent, not a hard cut line in the final image: complete lamps, trees, benches, awnings, and façade edits fully—even if that requires painting a modest band beyond the white strokes—without altering distant unrelated areas.';
+
+/** Mask mode: only implement the user’s words inside white; no scope creep. */
+export const MASK_NO_UNREQUESTED_EXTRAS =
+  'Do not invent extras the user did not ask for (random plants, bins, people, signs, or “street dressing”). Finishing the requested object slightly past the stroke is allowed; unrelated distant areas stay as in the reference.';
+
+/** Spatial cues apply only under the brush, not as a license to edit the whole street. */
+export const MASK_SPATIAL_SCOPE =
+  'Ground-plane and scale cues apply only inside the white mask; they are not permission to modify black areas.';
+
+/** Mask mode: row retail — neighbor bays stay untouched (e.g. one shop → flower shop). */
+export const MASK_ROW_RETAIL_FACADES =
+  'If the white mask covers part of a parade of shops, keep every adjoining unit’s façade, glazing, and signage identical to the reference wherever the map is black.';
+
 const SPATIAL_AWARENESS = [
   'Read the photograph as a 3D scene: separate sidewalk from carriageway using curbs, curb cuts, lane markings, and where building walls meet the ground.',
   'Place every addition on the correct supporting surface (paving, asphalt, plaza tiles) with full ground contact and consistent perspective / vanishing lines — nothing floating above the floor.',
@@ -66,9 +86,8 @@ function isPresetPrompt(prompt: string): prompt is TransformationType {
 /**
  * Build the final prompt sent to the model.
  *
- * - In mask mode, the mask is the primary placement hint; we still append
- *   spatial-awareness text so benches, racks, and edits sit on the right plane
- *   with believable scale.
+ * - In mask mode, append strict “black unchanged / no global extras” rules plus row-retail
+ *   hints; spatial awareness is scoped to the white region only.
  * - In full-image mode, we inject global constraints (including spatial awareness)
  *   and, for known presets, preset-specific add-ons.
  */
@@ -77,11 +96,12 @@ export function buildTransformPrompt(inputPrompt: string, opts: { editMode: Edit
   if (!base) return base;
 
   if (opts.editMode === 'mask') {
+    const maskCore = `${MASK_BLACK_UNCHANGED} ${MASK_EDGE_COMPLETION} ${MASK_NO_UNREQUESTED_EXTRAS} ${MASK_SPATIAL_SCOPE} ${MASK_ROW_RETAIL_FACADES}`;
     if (isPresetPrompt(base)) {
       const addon = PRESET_ADDONS[base];
-      if (addon) return `${base} ${SPATIAL_AWARENESS} ${addon}`;
+      if (addon) return `${base} ${maskCore} ${SPATIAL_AWARENESS} ${addon}`;
     }
-    return `${base} ${SPATIAL_AWARENESS}`;
+    return `${base} ${maskCore} ${SPATIAL_AWARENESS}`;
   }
 
   if (isPresetPrompt(base)) {

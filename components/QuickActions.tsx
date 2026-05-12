@@ -48,45 +48,45 @@ export const QuickActions: React.FC<QuickActionsProps> = ({
   const presetDisabled = disabled || presetsBlocked;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 mt-3 md:mt-4">
       {presetsBlocked && (
         <p className="text-[9px] font-bold text-eb-900/80 leading-snug border border-eb-900/20 bg-coral-100/40 px-2 py-2">
           {t.presetsBlockedHint}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-2 md:gap-4">
       <ActionBtn
-        icon={<Sun className="w-8 h-8 text-amber-400 fill-amber-400/20" />}
+        icon={<Sun className="w-6 h-6 md:w-8 md:h-8 text-amber-400 fill-amber-400/20" />}
         label={t.sunny}
         onClick={() => swallowAsync(onAction(TransformationType.SUNNY_DAY))}
         disabled={presetDisabled}
       />
       <ActionBtn
-        icon={<Trees className="w-8 h-8 text-emerald-500 fill-emerald-500/20" />}
+        icon={<Trees className="w-6 h-6 md:w-8 md:h-8 text-emerald-500 fill-emerald-500/20" />}
         label={t.nature}
         onClick={() => swallowAsync(onAction(TransformationType.ADD_TREES))}
         disabled={presetDisabled}
       />
       <ActionBtn
-        icon={<Droplets className="w-8 h-8 text-sky-500 fill-sky-500/20" />}
+        icon={<Droplets className="w-6 h-6 md:w-8 md:h-8 text-sky-500 fill-sky-500/20" />}
         label={t.water}
         onClick={() => swallowAsync(onAction(TransformationType.ADD_WATER))}
         disabled={presetDisabled}
       />
       <ActionBtn
-        icon={<Ban className="w-8 h-8 text-red-500" />}
+        icon={<Ban className="w-6 h-6 md:w-8 md:h-8 text-red-500" />}
         label={t.noCars}
         onClick={() => swallowAsync(onAction(TransformationType.REMOVE_CARS))}
         disabled={presetDisabled}
       />
       <ActionBtn
-        icon={<Armchair className="w-8 h-8 text-amber-800 fill-amber-800/15" />}
+        icon={<Armchair className="w-6 h-6 md:w-8 md:h-8 text-amber-800 fill-amber-800/15" />}
         label={t.bench}
         onClick={() => swallowAsync(onAction(TransformationType.ADD_BENCH))}
         disabled={presetDisabled}
       />
       <ActionBtn
-        icon={<Bike className="w-8 h-8 text-slate-600" />}
+        icon={<Bike className="w-6 h-6 md:w-8 md:h-8 text-slate-600" />}
         label={t.bikeRack}
         onClick={() => swallowAsync(onAction(TransformationType.ADD_BIKE_RACK))}
         disabled={presetDisabled}
@@ -107,12 +107,10 @@ const ActionBtn: React.FC<ActionBtnProps> = ({ icon, label, onClick, disabled })
   <button
     onClick={onClick}
     disabled={disabled}
-    className="flex flex-col items-center justify-center h-28 bg-white border-2 border-eb-900 transition-all group disabled:opacity-30 disabled:cursor-not-allowed shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px]"
+    className="flex flex-col items-center justify-center h-24 md:h-28 bg-white border-2 border-eb-900 transition-all group disabled:opacity-30 disabled:cursor-not-allowed shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px]"
   >
-    <div className="mb-2">
-      {icon}
-    </div>
-    <span className="text-[10px] font-black text-eb-900 tracking-widest text-center">
+    <div className="mb-1 md:mb-2">{icon}</div>
+    <span className="text-[9px] md:text-[10px] font-black text-eb-900 tracking-tight md:tracking-widest text-center leading-tight px-0.5">
       {label}
     </span>
   </button>

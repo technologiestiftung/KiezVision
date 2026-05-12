@@ -6,32 +6,48 @@ interface InpaintCanvasProps {
   isEraser: boolean;
 }
 
-const COLORS = [
-  '#ffffff',
-];
+/** On-screen brush: soft #d2d4ff tint, low opacity — mask export still maps strokes to white. */
+const BRUSH_INDICATOR = 'rgba(210, 212, 255, 0.34)';
 
 export const InpaintCanvas = forwardRef<
-  { clear: () => void; getMaskDataUrl: () => string | null },
+  { clear: () => void; getMaskDataUrl: () => string | null; hasMaskPaint: () => boolean },
   InpaintCanvasProps
 >(({ image, onOverlayChange, brushSize, isEraser }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
+  /** Last stroke point in canvas pixel space — required so lineTo segments connect after each stroke(). */
+  const lastStrokePointRef = useRef<{ x: number; y: number } | null>(null);
   /** Prevents paint until base image has sized canvases (avoids onload clearing strokes mid-brush). */
   const baseImageReadyRef = useRef(false);
   /** Discards stale Image() decode callbacks after remount or image change. */
   const imageLoadGenRef = useRef(0);
-  const selectedColor = '#ffffff';
+  const selectedColor = BRUSH_INDICATOR;
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
+
+  const hasMaskPaint = (): boolean => {
+    const canvas = drawingCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas?.width || !canvas.height || !ctx) return false;
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = canvas.width * canvas.height;
+    const step = px > 3_000_000 ? 64 : px > 1_000_000 ? 32 : 4;
+    for (let i = 0; i < data.length; i += step) {
+      const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      if (lum > 12) return true;
+    }
+    return false;
+  };
 
   const clearCanvas = () => {
     const canvas = drawingCanvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (canvas && ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      lastStrokePointRef.current = null;
       onOverlayChange(null);
     }
   };
@@ -72,6 +88,7 @@ export const InpaintCanvas = forwardRef<
   useImperativeHandle(ref, () => ({
     clear: clearCanvas,
     getMaskDataUrl: () => buildMaskDataUrlFromDrawing(),
+    hasMaskPaint,
   }));
 
   const lastImageRef = useRef<string>('');
@@ -178,15 +195,19 @@ export const InpaintCanvas = forwardRef<
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
 
+    const prev = lastStrokePointRef.current;
+    if (!prev) return;
+
     ctx.globalCompositeOperation = isEraser ? 'destination-out' : 'source-over';
     ctx.strokeStyle = selectedColor;
-    ctx.lineWidth = (brushSize * 2) / scale; 
+    ctx.lineWidth = (brushSize * 2) / scale;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(prev.x, prev.y);
     ctx.lineTo(x, y);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+    lastStrokePointRef.current = { x, y };
   };
 
   const updateOverlays = () => {
@@ -199,6 +220,7 @@ export const InpaintCanvas = forwardRef<
     setMousePos(null);
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+    lastStrokePointRef.current = null;
     updateOverlays();
   };
 
@@ -223,8 +245,9 @@ export const InpaintCanvas = forwardRef<
       ctx.moveTo(x, y);
       ctx.lineTo(x, y);
       ctx.stroke();
+      lastStrokePointRef.current = { x, y };
     }
-    
+
     // Call updateOverlays even on start in case it's just a dot
     updateOverlays();
   };
@@ -275,21 +298,21 @@ export const InpaintCanvas = forwardRef<
         <canvas ref={imageCanvasRef} className="absolute inset-0 w-full h-full" />
         <canvas 
           ref={drawingCanvasRef} 
-          className="absolute inset-0 w-full h-full z-10 opacity-75 pointer-events-none"
+          className="absolute inset-0 w-full h-full z-10 pointer-events-none"
         />
 
         {/* Brush Preview Cursor */}
         {mousePos && (
           <div 
-            className={`fixed pointer-events-none z-50 border border-white/50 rounded-full ${isEraser ? 'mix-blend-normal bg-red-500/20 border-red-500' : 'mix-blend-difference'}`}
+            className={`fixed pointer-events-none z-50 rounded-full border ${isEraser ? 'mix-blend-normal bg-red-500/20 border-red-500' : 'border-[#b8bce8]/60 mix-blend-normal'}`}
             style={{
               left: mousePos.x,
               top: mousePos.y,
               width: `${getVisualBrushSize()}px`,
               height: `${getVisualBrushSize()}px`,
               transform: 'translate(-50%, -50%)',
-              backgroundColor: isEraser ? undefined : 'rgba(59, 130, 246, 0.4)',
-              boxShadow: isEraser ? '0 0 10px rgba(239, 68, 68, 0.3)' : '0 0 0 1px rgba(0,0,0,0.2)'
+              backgroundColor: isEraser ? undefined : 'rgba(210, 212, 255, 0.28)',
+              boxShadow: isEraser ? '0 0 10px rgba(239, 68, 68, 0.3)' : '0 0 0 1px rgba(30, 55, 145, 0.12)',
             }}
           >
             {isEraser && <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-red-500">ERASER</div>}

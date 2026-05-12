@@ -12,7 +12,7 @@ import { BeforeAfterSlider } from './components/BeforeAfterSlider';
 import { InpaintCanvas } from './components/InpaintCanvas';
 import { QuickActions } from './components/QuickActions';
 import { TransformationPanel } from './components/TransformationPanel';
-import { transformImage } from './services/geminiService';
+import { transformImage, type GeminiImageAspectRatio } from './services/geminiService';
 import { geocodeBerlin, fetchMapillaryImage, reverseGeocodeLocation } from './services/mapillaryService';
 import { buildTransformPrompt } from './services/presetRules';
 import {
@@ -44,6 +44,93 @@ const BERLIN_DISTRICTS = [
 ];
 
 const kiezvisionLogoUrl = '/kiezvision_logo.png';
+
+/** 3×3 max dilation on mask alpha — expands matte slightly so generated objects are not hard-clipped at brush edges. */
+function dilateMaskAlpha(data: Uint8ClampedArray, width: number, height: number, iterations: number): void {
+  if (iterations <= 0) return;
+  const len = width * height;
+  const cur = new Uint8Array(len);
+  const next = new Uint8Array(len);
+  for (let i = 0, p = 0; p < len; i += 4, p++) {
+    cur[p] = data[i + 3];
+  }
+  for (let iter = 0; iter < iterations; iter++) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        let m = cur[idx];
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          const row = yy * width;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            const v = cur[row + xx];
+            if (v > m) m = v;
+          }
+        }
+        next[idx] = m;
+      }
+    }
+    cur.set(next);
+  }
+  for (let i = 0, p = 0; p < len; i += 4, p++) {
+    data[i + 3] = cur[p];
+  }
+}
+
+/** Separable 5-tap binomial blur on alpha only — softens the matte so the pasted edit blends into the original at the boundary. */
+function featherMaskAlphaGaussian(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  horizontalVerticalCycles: number,
+): void {
+  if (horizontalVerticalCycles <= 0) return;
+  const len = width * height;
+  const a = new Float32Array(len);
+  const b = new Float32Array(len);
+  for (let i = 0, p = 0; p < len; i += 4, p++) {
+    a[p] = data[i + 3];
+  }
+  const k0 = 1 / 16;
+  const k1 = 4 / 16;
+  const k2 = 6 / 16;
+  const clampX = (x: number) => (x < 0 ? 0 : x >= width ? width - 1 : x);
+  const clampY = (y: number) => (y < 0 ? 0 : y >= height ? height - 1 : y);
+
+  for (let c = 0; c < horizontalVerticalCycles; c++) {
+    for (let y = 0; y < height; y++) {
+      const row = y * width;
+      for (let x = 0; x < width; x++) {
+        const s =
+          k0 * a[row + clampX(x - 2)] +
+          k1 * a[row + clampX(x - 1)] +
+          k2 * a[row + x] +
+          k1 * a[row + clampX(x + 1)] +
+          k0 * a[row + clampX(x + 2)];
+        b[row + x] = s;
+      }
+    }
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const s =
+          k0 * b[clampY(y - 2) * width + x] +
+          k1 * b[clampY(y - 1) * width + x] +
+          k2 * b[y * width + x] +
+          k1 * b[clampY(y + 1) * width + x] +
+          k0 * b[clampY(y + 2) * width + x];
+        a[y * width + x] = s;
+      }
+    }
+  }
+
+  for (let i = 0, p = 0; p < len; i += 4, p++) {
+    const v = Math.round(a[p]);
+    data[i + 3] = v < 0 ? 0 : v > 255 ? 255 : v;
+  }
+}
 
 function BackToHomeNavButton({
   navigate,
@@ -157,6 +244,9 @@ export default function App() {
       capture: "Capture",
       library: "Library",
       backToHome: "Back to Home",
+      editorNoImageTitle: "Nothing to edit yet",
+      editorNoImageSubtitle:
+        "The photo lives only in this browser tab. Reloading the page or opening the editor link directly clears it. Start from home or open a saved vision from the Library.",
       imageLibrary: "Image Library",
       startTransformation: "Start Transformation",
       imageGallery: "Image Gallery",
@@ -203,7 +293,7 @@ export default function App() {
       eraser: "Eraser",
       clearMask: "Clear mask",
       areaEditTipTitle: "Placement tip",
-      areaEditTipBody: "Brush roughly where you want the change — it is only a hint. The model fits the scene as a whole photo.",
+      areaEditTipBody: "The soft lavender brush shows where to edit. The merge step adds a small ring beyond your stroke so lamps, awnings, and furniture are not cut off at the edge; distant parts of the photo stay unchanged.",
       sourceMapillary: "Mapillary Real Image",
       sourceAI: "AI Generated",
       realPhoto: "real photo",
@@ -225,6 +315,9 @@ export default function App() {
       capture: "Aufnehmen",
       library: "Galerie",
       backToHome: "Zurück zum Start",
+      editorNoImageTitle: "Noch kein Bild zum Bearbeiten",
+      editorNoImageSubtitle:
+        "Das Foto liegt nur im Speicher dieses Tabs. Nach einem Reload oder direktem Aufruf von /edit ist es weg — starte auf der Startseite oder öffne eine Vision aus der Galerie.",
       imageLibrary: "Bildgalerie",
       startTransformation: "Transformation starten",
       imageGallery: "Bildergalerie",
@@ -271,7 +364,7 @@ export default function App() {
       eraser: "Radierer",
       clearMask: "Maske leeren",
       areaEditTipTitle: "Platzierung",
-      areaEditTipBody: "Malen Sie ungefähr dort, wo Sie die Änderung wollen — nur ein Hinweis. Das Modell fügt sie ins Gesamtbild ein.",
+      areaEditTipBody: "Der helle Pinsel zeigt den Bearbeitungsort. Beim Zusammenfügen wird die Maske leicht über den Strich erweitert, damit Masten, Markisen und Möbel nicht am Rand abgeschnitten werden; der übrige Bildbereich bleibt unverändert.",
       sourceMapillary: "Echtes Bild",
       sourceAI: "KI-Generiert",
       realPhoto: "Echtes Foto",
@@ -393,6 +486,7 @@ export default function App() {
   const canvasRef = useRef<{
     clear: () => void;
     getMaskDataUrl: () => string | null;
+    hasMaskPaint: () => boolean;
   } | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -756,53 +850,18 @@ export default function App() {
   const handleSaveToLibrary = async () => {
     if (!currentImage) return;
     setError(null);
-    const promptText = history[0]?.prompt || 'Saved Image';
-    const ts = Date.now();
-
-    // Browsers without File System Access (e.g. Safari): keep the vision in the
-    // in-app Library only (localStorage + inline image). Disk copy is skipped.
-    if (!isFileSystemAccessSupported()) {
-      const id = `${ts}_${Math.random().toString(16).slice(2, 8)}`;
-      const entry: LibraryEntry = {
-        id,
-        prompt: promptText,
-        timestamp: ts,
-        folder: '',
-        filename: '',
-        thumbFilename: '',
-        dataUrl: currentImage,
-      };
-      setLibrary((prev) => [entry, ...prev]);
-      thumbLoadStatusRef.current[entry.id] = 'done';
-      setThumbCache((prev) => ({ ...prev, [entry.id]: currentImage }));
-      setLastExportedImage(currentImage);
-      navigate('/library');
-      return;
-    }
-
     try {
       const ready = await ensureLibraryFolder();
-      if (!ready) {
-        setError(
-          language === 'en'
-            ? 'To save to the Library, allow folder access when prompted, or set a library folder on the Library page.'
-            : 'Zum Speichern in der Galerie bitte den Ordnerzugriff erlauben oder auf der Galerie-Seite einen Ordner wählen.'
-        );
-        return;
-      }
+      if (!ready) return;
+      const ts = Date.now();
       const { entry } = await saveImageToLibrary({
         dataUrl: currentImage,
-        prompt: promptText,
+        prompt: history[0]?.prompt || 'Saved Image',
         timestamp: ts,
       });
       setLibrary((prev) => [entry, ...prev]);
-      const thumbUrl = await loadThumbnailObjectUrl(entry);
-      if (thumbUrl) {
-        thumbLoadStatusRef.current[entry.id] = 'done';
-        setThumbCache((prev) => (prev[entry.id] ? prev : { ...prev, [entry.id]: thumbUrl }));
-      }
       setLastExportedImage(currentImage);
-      navigate('/library');
+      alert(language === 'en' ? 'Saved to your library!' : 'In Ihrer Galerie gespeichert!');
     } catch (err: any) {
       if (err?.message === 'NO_LIBRARY_FOLDER') {
         setError(
@@ -960,12 +1019,17 @@ export default function App() {
   };
 
   const compositeImageWithMask = (originalBase64: string, transformedBase64: string, maskBase64: string): Promise<string> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const original = new Image();
       const transformed = new Image();
       const mask = new Image();
-      
+
       let loaded = 0;
+      const fail = (msg: string) => {
+        console.warn(msg);
+        reject(new Error(msg));
+      };
+
       const checkLoaded = () => {
         loaded++;
         if (loaded === 3) {
@@ -973,25 +1037,23 @@ export default function App() {
           canvas.width = original.width;
           canvas.height = original.height;
           const ctx = canvas.getContext('2d');
-          if (!ctx) return resolve(transformedBase64);
-          
-          // 1. Draw original background
+          if (!ctx) return fail('Could not create canvas for mask merge');
+
           ctx.drawImage(original, 0, 0);
-          
-          // 2. Prepare mask in memory with slight feathering for smooth blend
+
+          // Mask: luminance → alpha, then modest dilation so completed objects are not cut off at stroke edges.
           const maskCanvas = document.createElement('canvas');
           maskCanvas.width = original.width;
           maskCanvas.height = original.height;
           const mctx = maskCanvas.getContext('2d');
-          if (!mctx) return resolve(transformedBase64);
-          
+          if (!mctx) return fail('Could not create mask canvas');
+
           mctx.drawImage(mask, 0, 0, maskCanvas.width, maskCanvas.height);
 
-          // Matte from brush: steeper alpha than before so insertions do not look mushy at the boundary.
           const maskImageData = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
           const pixels = maskImageData.data;
-          const lo = 36;
-          const hi = 96;
+          const lo = 40;
+          const hi = 92;
           for (let i = 0; i < pixels.length; i += 4) {
             const lum = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
             const a =
@@ -1001,70 +1063,81 @@ export default function App() {
             pixels[i + 1] = 255;
             pixels[i + 2] = 255;
           }
+          const pxCount = maskCanvas.width * maskCanvas.height;
+          let dilateIter = Math.min(10, Math.max(4, Math.round(original.width / 130)));
+          if (pxCount > 5_000_000) dilateIter = Math.min(dilateIter, 8);
+          if (pxCount > 10_000_000) dilateIter = Math.min(dilateIter, 6);
+          dilateMaskAlpha(maskImageData.data, maskCanvas.width, maskCanvas.height, dilateIter);
           mctx.putImageData(maskImageData, 0, 0);
+          const edge = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+          dilateMaskAlpha(edge.data, maskCanvas.width, maskCanvas.height, 2);
+          // Feather matte so pasted pixels alpha-blend into the reference at the edge (hides hard seams).
+          const featherCycles =
+            pxCount > 8_000_000 ? 2 : pxCount > 3_000_000 ? 3 : 4;
+          featherMaskAlphaGaussian(edge.data, maskCanvas.width, maskCanvas.height, featherCycles);
+          mctx.putImageData(edge, 0, 0);
 
-          // Light edge feather only (was up to ~48px blur — that smeared benches, racks, and fine detail).
-          const blurredMaskCanvas = document.createElement('canvas');
-          blurredMaskCanvas.width = maskCanvas.width;
-          blurredMaskCanvas.height = maskCanvas.height;
-          const bmctx = blurredMaskCanvas.getContext('2d');
-          if (bmctx) {
-            const blurRadius = Math.max(1, Math.min(5, Math.round(original.width / 900)));
-            bmctx.filter = `blur(${blurRadius}px)`;
-            bmctx.drawImage(maskCanvas, 0, 0);
-            bmctx.filter = 'none';
-          }
-          
-          // 3. Draw transformed image only through the mask
           const transformedCanvas = document.createElement('canvas');
           transformedCanvas.width = original.width;
           transformedCanvas.height = original.height;
           const tctx = transformedCanvas.getContext('2d');
-          if (!tctx) return resolve(transformedBase64);
-          
-          // Draw AI image, scaling it to match original dimensions if needed
-          // Some AI models might return slightly different dimensions
+          if (!tctx) return fail('Could not create transformed canvas');
+
           tctx.drawImage(transformed, 0, 0, transformedCanvas.width, transformedCanvas.height);
-          
-          // Apply mask
+
           tctx.globalCompositeOperation = 'destination-in';
-          tctx.drawImage(blurredMaskCanvas || maskCanvas, 0, 0);
-          
-          // 4. Composite result on top of original
+          tctx.drawImage(maskCanvas, 0, 0);
+
           ctx.globalCompositeOperation = 'source-over';
           ctx.drawImage(transformedCanvas, 0, 0);
-          
+
           resolve(canvas.toDataURL('image/png'));
         }
       };
-      
-      const handleError = () => resolve(transformedBase64);
-      
+
+      const handleError = () => fail('Image or mask failed to load for composition');
+
       original.onload = checkLoaded;
       transformed.onload = checkLoaded;
       mask.onload = checkLoaded;
       original.onerror = handleError;
       transformed.onerror = handleError;
       mask.onerror = handleError;
-      
+
       original.src = originalBase64;
       transformed.src = transformedBase64;
       mask.src = maskBase64;
     });
   };
 
-  const getBestAspectRatio = (imgUrl: string): Promise<"1:1" | "3:4" | "4:3" | "9:16" | "16:9"> => {
+  /** Pick the Gemini `aspectRatio` closest to the photo so outputs are not letterboxed/cropped vs wrong buckets. */
+  const getBestAspectRatio = (imgUrl: string): Promise<GeminiImageAspectRatio> => {
+    const targets: { label: GeminiImageAspectRatio; r: number }[] = [
+      { label: '21:9', r: 21 / 9 },
+      { label: '16:9', r: 16 / 9 },
+      { label: '3:2', r: 3 / 2 },
+      { label: '4:3', r: 4 / 3 },
+      { label: '1:1', r: 1 },
+      { label: '3:4', r: 3 / 4 },
+      { label: '2:3', r: 2 / 3 },
+      { label: '9:16', r: 9 / 16 },
+    ];
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
         const ratio = img.width / img.height;
-        if (ratio > 1.5) resolve("16:9");
-        else if (ratio > 1.2) resolve("4:3");
-        else if (ratio > 0.8) resolve("1:1");
-        else if (ratio > 0.6) resolve("3:4");
-        else resolve("9:16");
+        let best: GeminiImageAspectRatio = '4:3';
+        let bestScore = Infinity;
+        for (const { label, r } of targets) {
+          const score = Math.abs(Math.log(ratio / r));
+          if (score < bestScore) {
+            bestScore = score;
+            best = label;
+          }
+        }
+        resolve(best);
       };
-      img.onerror = () => resolve("16:9");
+      img.onerror = () => resolve('16:9');
       img.src = imgUrl;
     });
   };
@@ -1078,8 +1151,8 @@ export default function App() {
     try {
       let maskForRun: string | null = null;
       if (editMode === 'mask') {
-        const flushed = canvasRef.current?.getMaskDataUrl?.() ?? null;
-        maskForRun = flushed || maskBase64;
+        const painted = canvasRef.current?.hasMaskPaint?.() ?? false;
+        maskForRun = painted ? (canvasRef.current?.getMaskDataUrl?.() ?? null) : null;
         if (!maskForRun) {
           setError(
             language === 'en'
@@ -1107,7 +1180,13 @@ export default function App() {
         try {
           finalImageData = await compositeImageWithMask(currentImage, newImageDataRaw, maskForRun);
         } catch (compErr) {
-          console.warn("Mask composition failed, using raw AI output:", compErr);
+          console.warn('Mask composition failed:', compErr);
+          setError(
+            language === 'en'
+              ? 'Could not limit the AI result to your brush. Try again or use a smaller image.'
+              : 'Das Ergebnis konnte nicht auf den Pinselbereich beschränkt werden. Bitte erneut versuchen oder ein kleineres Bild nutzen.',
+          );
+          return;
         }
       }
       
@@ -1214,7 +1293,7 @@ export default function App() {
                   onClick={handleSaveToLibrary} 
                   className="bg-eb-900 text-eb-50 px-6 h-full border-2 border-eb-900 text-xs font-black transition-all shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 flex items-center gap-2"
                 >
-                  <Save className="w-4 h-4" /> <span className="hidden lg:inline">{t.save}</span>
+                  <Save className="w-4 h-4" /> <span className="hidden md:inline">{t.save}</span>
                 </button>
                 <button 
                   onClick={() => {
@@ -1285,6 +1364,34 @@ export default function App() {
               </div>
             </div>
           </motion.div>
+        )}
+
+        {view === 'editor' && !originalImage && (
+          <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center p-8 text-center max-w-lg mx-auto">
+            <AlertCircle className="w-14 h-14 text-coral-500 mb-4" aria-hidden />
+            <h2 className="text-2xl md:text-3xl font-black tracking-tighter mb-3 text-eb-900">
+              {t.editorNoImageTitle}
+            </h2>
+            <p className="text-sm md:text-base font-bold text-eb-900/70 mb-8 leading-relaxed">
+              {t.editorNoImageSubtitle}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 w-full sm:justify-center">
+              <button
+                type="button"
+                onClick={() => navigate('/', { replace: true })}
+                className="bg-eb-900 text-eb-50 px-8 py-4 border-2 border-eb-900 text-xs font-black shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 transition-all"
+              >
+                {t.backToHome}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/library', { replace: true })}
+                className="bg-white text-eb-900 px-8 py-4 border-2 border-eb-900 text-xs font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+              >
+                {t.library}
+              </button>
+            </div>
+          </div>
         )}
 
         {view === 'home' && (
@@ -1613,9 +1720,9 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-12 gap-8 flex-1 min-h-0 overflow-hidden">
+              <div className="grid grid-cols-12 gap-4 md:gap-8 flex-1 min-h-0 overflow-hidden">
                 {/* Thumbnail Rail */}
-                <div className="col-span-12 lg:col-span-3 min-h-0 overflow-hidden">
+                <div className="col-span-12 md:col-span-3 min-h-0 overflow-hidden">
                   <div className="bg-white border-2 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] overflow-hidden h-full flex flex-col min-h-0">
                     <div className="bg-tsb text-eb-50 px-4 py-2 text-[10px] font-black">
                       {language === 'en' ? 'Uploaded images' : 'Hochgeladene Bilder'} • {uploadedGallery.length}
@@ -1625,7 +1732,7 @@ export default function App() {
                         <button
                           key={img.id}
                           onClick={() => setSelectedGalleryId(img.id)}
-                          className={`w-full h-28 sm:h-32 lg:h-36 flex-shrink-0 overflow-hidden transition-all ${
+                          className={`w-full h-28 sm:h-32 md:h-36 flex-shrink-0 overflow-hidden transition-all ${
                             selectedGalleryId === img.id ? 'border-4 border-coral-500' : 'border-2 border-eb-900/20 hover:border-eb-900'
                           }`}
                           title={img.prompt}
@@ -1638,7 +1745,7 @@ export default function App() {
                 </div>
 
                 {/* Preview + CTA */}
-                <div className="col-span-12 lg:col-span-9 min-h-0 overflow-hidden">
+                <div className="col-span-12 md:col-span-9 min-h-0 overflow-hidden">
                   {(() => {
                     const selected = uploadedGallery.find((x) => x.id === selectedGalleryId) || uploadedGallery[0];
                     return (
@@ -1675,9 +1782,9 @@ export default function App() {
         )}
 
         {view === 'editor' && originalImage && (
-          <div className="flex flex-col lg:grid lg:grid-cols-12 min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] lg:max-h-[calc(100vh-80px)]">
-            <div className="order-1 lg:order-none col-span-12 lg:col-span-8 flex flex-col flex-1 min-h-0 w-full lg:h-full lg:max-h-full bg-white border-r-0 lg:border-r-2 border-eb-900">
-              <div className="relative flex-1 min-h-[45vh] lg:min-h-0 bg-kv-chrome overflow-hidden">
+          <div className="flex flex-col md:grid md:grid-cols-12 min-h-[calc(100vh-80px)] md:h-[calc(100vh-80px)] md:max-h-[calc(100vh-80px)]">
+            <div className="order-1 md:order-none col-span-12 md:col-span-8 flex flex-col flex-1 min-h-0 w-full md:h-full md:max-h-full bg-white border-r-0 md:border-r-2 border-eb-900">
+              <div className="relative flex-1 min-h-[min(42vh,320px)] md:min-h-0 bg-kv-chrome overflow-hidden">
                  {processing.isProcessing && (
                    <motion.div 
                      initial={{ opacity: 0 }}
@@ -1747,7 +1854,7 @@ export default function App() {
               </div>
 
               {/* Version History Footer Slider */}
-              <div className="bg-white border-t-2 border-eb-900 p-6">
+              <div className="bg-white border-t-2 border-eb-900 p-4 md:p-6">
                 <div className="flex items-center justify-between mb-4">
                    <h3 className="text-[11px] font-black flex items-center gap-2">
                      <History className="w-4 h-4" /> {t.iterations}
@@ -1771,17 +1878,17 @@ export default function App() {
               </div>
             </div>
 
-            {/* Sidebar Controls */}
-            <div className="order-2 lg:order-none col-span-12 lg:col-span-4 w-full shrink-0 lg:h-full lg:min-h-0 bg-coral-500 flex flex-col p-8 overflow-y-auto custom-scrollbar border-t-2 lg:border-t-0 border-eb-900">
-              <div className="mb-10 bg-tsb text-eb-50 p-4 shadow-[8px_8px_0px_0px_rgba(30,55,145,0.35)]">
-                <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
-                  <Wand2 className="w-6 h-6" /> {t.toolkit}
+            {/* Sidebar Controls — md+ matches desktop: image left, toolkit right (narrower padding on tablet) */}
+            <div className="order-2 md:order-none col-span-12 md:col-span-4 w-full shrink-0 md:h-full md:min-h-0 bg-coral-500 flex flex-col p-4 sm:p-5 md:p-5 lg:p-8 overflow-y-auto custom-scrollbar border-t-2 md:border-t-0 border-eb-900">
+              <div className="mb-6 md:mb-8 lg:mb-10 bg-tsb text-eb-50 p-3 md:p-4 shadow-[8px_8px_0px_0px_rgba(30,55,145,0.35)]">
+                <h2 className="text-lg md:text-xl lg:text-2xl font-black tracking-tighter flex items-center gap-2 md:gap-3">
+                  <Wand2 className="w-5 h-5 md:w-6 md:h-6 shrink-0" /> {t.toolkit}
                 </h2>
               </div>
 
-              <div className="space-y-10">
+              <div className="space-y-6 md:space-y-8 lg:space-y-10">
                 {editMode === 'mask' && (
-                    <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
+                    <div className="bg-white border-2 border-eb-900 p-4 md:p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
                       <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1 mb-6">{t.maskSettings}</h3>
                       <div className="flex items-center justify-between mb-6">
                         <h4 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.size}</h4>
@@ -1831,8 +1938,8 @@ export default function App() {
                     </div>
                 )}
 
-                <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
-                  <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.presets}</h3>
+                <div className="bg-white border-2 border-eb-900 p-4 md:p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
+                  <h3 className="text-xs font-black border-b-2 border-eb-900 pb-2 mb-0">{t.presets}</h3>
                   <QuickActions
                     onAction={handleTransform}
                     disabled={processing.isProcessing}
@@ -1841,7 +1948,7 @@ export default function App() {
                   />
                 </div>
                 
-                <div className="bg-white border-2 border-eb-900 p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
+                <div className="bg-white border-2 border-eb-900 p-4 md:p-6 shadow-[8px_8px_0px_0px_rgba(32,32,27,1)]">
                   <h3 className="text-xs font-black border-b-2 border-eb-900 pb-1">{t.customCommand}</h3>
                   <TransformationPanel 
                     onTransform={handleTransform} 
