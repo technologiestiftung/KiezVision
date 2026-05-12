@@ -6,8 +6,10 @@ import {
 } from "@google/genai";
 import {
   MASK_BLACK_UNCHANGED,
+  MASK_CURRENT_MAP_ONLY,
   MASK_EDGE_COMPLETION,
   MASK_NO_UNREQUESTED_EXTRAS,
+  MASK_REFERENCE_GEOMETRY,
   MASK_ROW_RETAIL_FACADES,
   MASK_SPATIAL_SCOPE,
 } from "./presetRules";
@@ -39,9 +41,14 @@ const MASK_IS_LOCATION_ONLY =
 
 const getAiClient = () => {
   // Priority: 1. API_KEY (from selection dialog), 2. CUSTOM_GEMINI_API_KEY (from secrets), 3. GEMINI_API_KEY (default)
-  const apiKey = process.env.API_KEY || process.env.CUSTOM_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  const apiKey =
+    process.env.API_KEY ||
+    process.env.CUSTOM_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("Gemini API Key not found. Please ensure an API key is provided.");
+    throw new Error(
+      "Gemini API Key not found. Please ensure an API key is provided.",
+    );
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -49,21 +56,27 @@ const getAiClient = () => {
 /**
  * Helper to call Gemini with exponential backoff for 429 errors
  */
-const callWithRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> => {
+const callWithRetry = async <T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error: any) {
       lastError = error;
-      const isQuotaError = error.message?.includes("429") || 
-                          error.status === "RESOURCE_EXHAUSTED" ||
-                          JSON.stringify(error).includes("429");
-      
+      const isQuotaError =
+        error.message?.includes("429") ||
+        error.status === "RESOURCE_EXHAUSTED" ||
+        JSON.stringify(error).includes("429");
+
       if (isQuotaError && i < maxRetries - 1) {
         const delay = Math.pow(2, i) * 2000 + Math.random() * 1000;
-        console.warn(`Quota exceeded (429). Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        console.warn(
+          `Quota exceeded (429). Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
       throw error;
@@ -76,24 +89,25 @@ const callWithRetry = async <T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
  * Helper to ensure an image is in base64 format for the Gemini API.
  */
 /** MIME + raw base64 (no data: prefix) for API inlineData */
-const ensureBase64 = async (imageInput: string): Promise<{ mimeType: string; base64: string }> => {
-  if (imageInput.startsWith('data:')) {
+const ensureBase64 = async (
+  imageInput: string,
+): Promise<{ mimeType: string; base64: string }> => {
+  if (imageInput.startsWith("data:")) {
     const m = imageInput.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
     if (m) {
       let mime = m[1].toLowerCase();
-      if (mime === 'image/jpg') mime = 'image/jpeg';
+      if (mime === "image/jpg") mime = "image/jpeg";
       return { mimeType: mime, base64: m[2] };
     }
-    const stripped = imageInput.replace(/^data:image\/[\w.+~-]+;base64,/i, '');
-    return { mimeType: 'image/jpeg', base64: stripped };
+    const stripped = imageInput.replace(/^data:image\/[\w.+~-]+;base64,/i, "");
+    return { mimeType: "image/jpeg", base64: stripped };
   }
 
   try {
     const response = await fetch(imageInput);
     const blob = await response.blob();
-    const mimeType = blob.type && blob.type.startsWith('image/')
-      ? blob.type
-      : 'image/jpeg';
+    const mimeType =
+      blob.type && blob.type.startsWith("image/") ? blob.type : "image/jpeg";
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -102,7 +116,7 @@ const ensureBase64 = async (imageInput: string): Promise<{ mimeType: string; bas
         if (m) {
           resolve({ mimeType: m[1], base64: m[2] });
         } else {
-          reject(new Error('Unexpected data URL format from blob'));
+          reject(new Error("Unexpected data URL format from blob"));
         }
       };
       reader.onerror = reject;
@@ -110,7 +124,7 @@ const ensureBase64 = async (imageInput: string): Promise<{ mimeType: string; bas
     });
   } catch (error) {
     console.error("Failed to convert image to base64:", error);
-    return { mimeType: 'image/jpeg', base64: imageInput };
+    return { mimeType: "image/jpeg", base64: imageInput };
   }
 };
 
@@ -125,62 +139,168 @@ const mimeAndBase64FromDataUrl = (
   return { mimeType: mime, base64: m[2] };
 };
 
+/** Inpainting: keep API inputs moderate — large photos + preview models often fail (IMAGE_OTHER). */
+const MAX_MASK_INPUT_DIMENSION_FOR_API = 1024;
+
+function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to decode image for API resize"));
+    img.src = dataUrl;
+  });
+}
+
+/** Downscale reference + mask together so registration is preserved. */
+async function scaleRefAndMaskForImageModel(
+  refDataUrl: string,
+  maskDataUrl: string | null | undefined,
+  maxDim: number,
+): Promise<{ ref: string; mask: string | null }> {
+  if (typeof document === "undefined") {
+    return { ref: refDataUrl, mask: maskDataUrl ?? null };
+  }
+  try {
+    const refImg = await loadImageFromDataUrl(refDataUrl);
+    const w = refImg.naturalWidth;
+    const h = refImg.naturalHeight;
+    if (!w || !h) return { ref: refDataUrl, mask: maskDataUrl ?? null };
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    if (scale >= 1) return { ref: refDataUrl, mask: maskDataUrl ?? null };
+
+    const nw = Math.max(1, Math.round(w * scale));
+    const nh = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = nw;
+    canvas.height = nh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { ref: refDataUrl, mask: maskDataUrl ?? null };
+    ctx.drawImage(refImg, 0, 0, nw, nh);
+    const scaledRef = canvas.toDataURL("image/jpeg", 0.9);
+
+    let scaledMask: string | null = maskDataUrl ?? null;
+    if (scaledMask) {
+      const mImg = await loadImageFromDataUrl(scaledMask);
+      const mc = document.createElement("canvas");
+      mc.width = nw;
+      mc.height = nh;
+      const mctx = mc.getContext("2d");
+      if (mctx) {
+        mctx.drawImage(mImg, 0, 0, nw, nh);
+        scaledMask = mc.toDataURL("image/png");
+      }
+    }
+    return { ref: scaledRef, mask: scaledMask };
+  } catch {
+    return { ref: refDataUrl, mask: maskDataUrl ?? null };
+  }
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    const slice = bytes.subarray(i, i + chunk);
+    binary += String.fromCharCode.apply(null, slice as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+function normalizeInlineDataPayload(part: Part): { mime: string; base64: string } | null {
+  const id = part.inlineData;
+  if (!id?.data) return null;
+  const mime = id.mimeType || "image/png";
+  const raw = id.data as string | Uint8Array;
+  if (typeof raw === "string") return { mime, base64: raw };
+  if (raw instanceof Uint8Array) return { mime, base64: uint8ArrayToBase64(raw) };
+  return null;
+}
+
+function firstImageMimeFromResponse(response: GenerateContentResponse): string {
+  for (const cand of response.candidates ?? []) {
+    for (const part of cand.content?.parts ?? []) {
+      if (part.inlineData?.mimeType) return part.inlineData.mimeType;
+    }
+  }
+  return "image/png";
+}
+
 function extractInlineImageDataUrl(response: GenerateContentResponse): string {
   const feedback = response.promptFeedback;
   if (feedback?.blockReason) {
     const msg =
-      typeof feedback.blockReasonMessage === 'string'
+      typeof feedback.blockReasonMessage === "string"
         ? feedback.blockReasonMessage
-        : '';
+        : "";
     throw new Error(
-      msg || `Prompt was blocked (${String(feedback.blockReason)}).`
+      msg || `Prompt was blocked (${String(feedback.blockReason)}).`,
     );
   }
 
+  const sdkImageB64 = response.data;
+  if (typeof sdkImageB64 === "string" && sdkImageB64.length > 0) {
+    const mime = firstImageMimeFromResponse(response);
+    return `data:${mime};base64,${sdkImageB64}`;
+  }
+
   const candidates = response.candidates ?? [];
+  if (candidates.length === 0) {
+    throw new Error(
+      "No image was returned from the transformation (empty response — check API key or try again).",
+    );
+  }
+
   const textPieces: string[] = [];
+  const finishReasons: string[] = [];
 
   for (const cand of candidates) {
+    if (cand.finishReason) finishReasons.push(String(cand.finishReason));
     const fr = cand.finishReason;
-    if (fr === 'SAFETY' || fr === 'BLOCKLIST' || fr === 'PROHIBITED_CONTENT') {
+    if (fr === "SAFETY" || fr === "BLOCKLIST" || fr === "PROHIBITED_CONTENT") {
       throw new Error(
-        `Transformation blocked (${fr}). Try a shorter or different prompt.`
+        `Transformation blocked (${fr}). Try a shorter or different prompt.`,
       );
     }
     const parts = cand.content?.parts ?? [];
     for (const part of parts) {
-      const id = part.inlineData;
-      if (id?.data) {
-        const mime = id.mimeType || 'image/png';
-        return `data:${mime};base64,${id.data}`;
-      }
-      if (part.text?.trim()) {
-        textPieces.push(part.text.trim());
-      }
+      if (part.thought === true) continue;
+      const normalized = normalizeInlineDataPayload(part);
+      if (normalized) return `data:${normalized.mime};base64,${normalized.base64}`;
+      if (part.text?.trim()) textPieces.push(part.text.trim());
     }
   }
 
-  const combined = textPieces.join('\n').trim();
+  const combined = textPieces.join("\n").trim();
   if (combined.length > 0) {
     throw new Error(
-      `No image in the reply (model returned text only): ${combined.slice(0, 280)}`
+      `No image in the reply (model returned text only): ${combined.slice(0, 280)}`,
     );
   }
 
-  throw new Error('No image was returned from the transformation.');
+  const hint =
+    finishReasons.length > 0 ? ` finishReason: ${finishReasons.join(", ")}.` : "";
+  throw new Error(
+    `No image was returned from the transformation.${hint} For area edits, use a smaller brush region or try again.`,
+  );
 }
 
 /**
  * Uses Gemini 2.5 Flash to get grounded descriptive details about a location.
  */
-export const getGroundedPrompt = async (prompt: string, highQuality = true): Promise<string> => {
+export const getGroundedPrompt = async (
+  prompt: string,
+  highQuality = true,
+): Promise<string> => {
   if (!highQuality) return prompt;
 
   return callWithRetry(async () => {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: { parts: [{ text: `Search for current Google Street View images and visual details of "${prompt}" in Berlin. 
+      contents: {
+        parts: [
+          {
+            text: `Search for current Google Street View images and visual details of "${prompt}" in Berlin. 
       Provide a highly detailed, photorealistic visual description for an AI image generator. 
       CRITICAL CONSTRAINTS:
       1. STYLE: Must look exactly like a Google Street View capture.
@@ -188,13 +308,16 @@ export const getGroundedPrompt = async (prompt: string, highQuality = true): Pro
       3. ATMOSPHERE: Clear daylight, neutral colors, realistic urban lighting.
       4. NO TEXT: Absolutely NO text, labels, watermarks, street signs names, or signatures in the description.
       Focus on architecture, street furniture, foliage, and atmosphere. 
-      Output ONLY the description.` }] },
+      Output ONLY the description.`,
+          },
+        ],
+      },
       config: {
         tools: [{ googleSearch: {} }],
       },
     });
     return response.text || prompt;
-  }).catch(error => {
+  }).catch((error) => {
     console.warn("Search grounding failed:", error);
     return prompt;
   });
@@ -203,19 +326,24 @@ export const getGroundedPrompt = async (prompt: string, highQuality = true): Pro
 /**
  * Generates a new image from scratch using the flash image model.
  */
-export const generateImage = async (prompt: string, highQuality = true): Promise<string> => {
+export const generateImage = async (
+  prompt: string,
+  highQuality = true,
+): Promise<string> => {
   // Get grounded details first (only if high quality)
   const detailedPrompt = await getGroundedPrompt(prompt, highQuality);
 
   return callWithRetry(async () => {
     const ai = getAiClient();
-    const model = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
-    
+    const model = highQuality
+      ? "gemini-3.1-flash-image-preview"
+      : "gemini-2.5-flash-image";
+
     const config: Record<string, unknown> = {
       responseModalities: [Modality.IMAGE],
       imageConfig: {
         aspectRatio: "16:9",
-        ...(highQuality ? { imageSize: '1K' as const } : {}),
+        ...(highQuality ? { imageSize: "1K" as const } : {}),
       },
     };
 
@@ -226,7 +354,7 @@ export const generateImage = async (prompt: string, highQuality = true): Promise
             searchTypes: {
               webSearch: {},
               imageSearch: {},
-            }
+            },
           },
         },
       ];
@@ -234,8 +362,7 @@ export const generateImage = async (prompt: string, highQuality = true): Promise
 
     const response = await ai.models.generateContent({
       model,
-      contents:
-        `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. ${NO_BLURRY_ARTIFACTS_HINT} CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
+      contents: `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. ${NO_BLURRY_ARTIFACTS_HINT} CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
       config: config as never,
     });
 
@@ -244,97 +371,186 @@ export const generateImage = async (prompt: string, highQuality = true): Promise
 };
 
 /**
- * Transforms an existing image, optionally using a mask for inpainting or a sketch for visual guidance.
+ * Multimodal parts for inpainting: text + ref + mask (rules aligned with presetRules mask mode).
  */
-export const transformImage = async (
-  imageBase64: string, 
-  prompt: string, 
-  maskBase64?: string | null,
-  highQuality = true,
-  aspectRatio: GeminiImageAspectRatio = "16:9"
-): Promise<string> => {
-  const [imagePrepared, maskPrepared] = await Promise.all([
-    ensureBase64(imageBase64),
-    maskBase64 ? ensureBase64(maskBase64) : Promise.resolve(null),
-  ]);
-
-  const refMeta = mimeAndBase64FromDataUrl(imageBase64);
-  const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
-  const maskMeta = maskBase64 ? mimeAndBase64FromDataUrl(maskBase64) : null;
-  const maskMime = maskMeta?.mimeType ?? maskPrepared?.mimeType ?? "image/png";
-
-  const userPrompt = prompt.replace(/"""+/g, '"').trim();
-
-  let parts: Part[];
-
-  if (maskPrepared) {
-    // Text MUST come first so the model binds this request to the following images.
-    parts = [
-      {
-        text: `PRIMARY EDIT REQUEST — apply exactly this change in this single generation (ignore any unrelated prior hypothetical edits):
-"""${userPrompt}"""
+function buildMaskEditParts(
+  userPromptInline: string,
+  refMime: string,
+  maskMime: string,
+  refB64: string,
+  maskB64: string,
+): Part[] {
+  return [
+    {
+      text: `PRIMARY EDIT REQUEST — apply exactly this change in this single generation:
+"""${userPromptInline}"""
 
 The next two parts are images in order:
 (1) REFERENCE PHOTO — full current scene to edit.
-(2) LOCATION MAP — same pixel grid as (1). White = minimum region for your edit; black = leave the reference unchanged in parts of the scene clearly away from that edit. ${MASK_IS_LOCATION_ONLY} ${MASK_BLACK_UNCHANGED} ${MASK_EDGE_COMPLETION} ${MASK_NO_UNREQUESTED_EXTRAS} ${MASK_SPATIAL_SCOPE} ${MASK_ROW_RETAIL_FACADES} Do not add unrelated global atmosphere or “street dressing” far from the brushed zone.
+(2) LOCATION MAP — same pixel grid as (1). ${MASK_CURRENT_MAP_ONLY} White = minimum region for your edit; black = leave the reference unchanged in parts of the scene clearly away from that edit. ${MASK_IS_LOCATION_ONLY} ${MASK_BLACK_UNCHANGED} ${MASK_EDGE_COMPLETION} ${MASK_NO_UNREQUESTED_EXTRAS} ${MASK_SPATIAL_SCOPE} ${MASK_REFERENCE_GEOMETRY} ${MASK_ROW_RETAIL_FACADES} Do not add unrelated global atmosphere or “street dressing” far from the brushed zone.
 
 Return ONE full-frame image: distant black-map areas match (1); the requested change appears centered on white with a modest completion band so poles, awnings, and furniture are not clipped at the stroke line. ${WHOLE_SCENE_COHERENCE_MASK} ${NO_CROP_IMAGE_HINT} ${NO_BLURRY_ARTIFACTS_HINT} No text or watermarks.`,
+    },
+    {
+      inlineData: {
+        mimeType: refMime,
+        data: refB64,
       },
-      {
-        inlineData: {
-          mimeType: refMime,
-          data: imagePrepared.base64,
-        },
+    },
+    {
+      inlineData: {
+        mimeType: maskMime,
+        data: maskB64,
       },
-      {
-        inlineData: {
-          mimeType: maskMime,
-          data: maskPrepared.base64,
-        },
+    },
+  ];
+}
+
+/**
+ * Transforms an existing image, optionally using a mask for inpainting or a sketch for visual guidance.
+ */
+export const transformImage = async (
+  imageBase64: string,
+  prompt: string,
+  maskBase64?: string | null,
+  highQuality = true,
+  aspectRatio: GeminiImageAspectRatio = "16:9",
+): Promise<string> => {
+  const userPrompt = prompt.replace(/"""+/g, '"').trim();
+
+  if (maskBase64) {
+    return callWithRetry(async () => {
+      const ai = getAiClient();
+      const plans: { maxDim: number; temperatures: number[] }[] = [
+        { maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API, temperatures: [0.28, 0.42] },
+        { maxDim: 768, temperatures: [0.36, 0.5] },
+      ];
+      let lastError = new Error("Area transform failed");
+
+      for (let pi = 0; pi < plans.length; pi++) {
+        const plan = plans[pi]!;
+        const scaled = await scaleRefAndMaskForImageModel(
+          imageBase64,
+          maskBase64,
+          plan.maxDim,
+        );
+        const [imagePrepared, maskPrepared] = await Promise.all([
+          ensureBase64(scaled.ref),
+          scaled.mask ? ensureBase64(scaled.mask) : Promise.resolve(null),
+        ]);
+        if (!maskPrepared) {
+          throw new Error("Mask could not be prepared for area edit.");
+        }
+        const refMeta = mimeAndBase64FromDataUrl(scaled.ref);
+        const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
+        const maskMeta = scaled.mask ? mimeAndBase64FromDataUrl(scaled.mask) : null;
+        const maskMime = maskMeta?.mimeType ?? maskPrepared.mimeType ?? "image/png";
+
+        const parts = buildMaskEditParts(
+          userPrompt,
+          refMime,
+          maskMime,
+          imagePrepared.base64,
+          maskPrepared.base64,
+        );
+
+        for (let ti = 0; ti < plan.temperatures.length; ti++) {
+          const temp = plan.temperatures[ti]!;
+          try {
+            const response = await ai.models.generateContent({
+              model: "gemini-2.5-flash-image",
+              contents: [{ role: "user", parts }],
+              config: {
+                responseModalities: [Modality.IMAGE],
+                temperature: temp,
+                imageConfig: { aspectRatio },
+              },
+            });
+            return extractInlineImageDataUrl(response);
+          } catch (e) {
+            lastError = e instanceof Error ? e : new Error(String(e));
+            const isLastPlan = pi === plans.length - 1;
+            const isLastTemp = ti === plan.temperatures.length - 1;
+            if (isLastPlan && isLastTemp) throw lastError;
+            console.warn(
+              `[transformImage] area edit retry (maxDim=${plan.maxDim}, temp=${temp}):`,
+              lastError.message.slice(0, 160),
+            );
+            await new Promise((r) => setTimeout(r, 450));
+          }
+        }
+      }
+
+      throw lastError;
+    });
+  }
+
+  const imagePrepared = await ensureBase64(imageBase64);
+
+  const refMeta = mimeAndBase64FromDataUrl(imageBase64);
+  const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
+
+  const parts: Part[] = [
+    {
+      inlineData: {
+        mimeType: refMime,
+        data: imagePrepared.base64,
       },
-    ];
-  } else {
-    parts = [
-      {
-        inlineData: {
-          mimeType: refMime,
-          data: imagePrepared.base64,
-        },
-      },
-      {
-        text: `Transform this image based on: ${userPrompt}. 
+    },
+    {
+      text: `Transform this image based on: ${userPrompt}. 
       Maintain the original scene structure and especially the buildings. Do NOT change any architecture unless explicitly told to.
       Ground any new elements on the correct surface (paving, asphalt, plaza) with believable size and perspective relative to doors, windows, curbs, and vehicles.
       ${NO_CROP_IMAGE_HINT}
       ${NO_BLURRY_ARTIFACTS_HINT}
       CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
-      },
-    ];
-  }
+    },
+  ];
 
   return callWithRetry(async () => {
     const ai = getAiClient();
-    // Masked edits used to always pick the preview model (`mask || highQuality`),
-    // so turning "high quality" off still hit the slow path. Follow the HQ toggle only.
-    const model = highQuality
-      ? 'gemini-3.1-flash-image-preview'
-      : 'gemini-2.5-flash-image';
 
-    const imageConfig = {
-      aspectRatio,
-      ...(highQuality ? { imageSize: '1K' as const } : {}),
-    };
+    type ImageAttempt = { model: string; imageSize?: "1K" };
+    const attempts: ImageAttempt[] = highQuality
+      ? [
+          { model: "gemini-3.1-flash-image-preview", imageSize: "1K" },
+          { model: "gemini-3.1-flash-image-preview" },
+          { model: "gemini-2.5-flash-image" },
+        ]
+      : [{ model: "gemini-2.5-flash-image" }];
 
-    const response = await ai.models.generateContent({
-      model,
-      contents: { role: 'user', parts },
-      config: {
-        responseModalities: [Modality.IMAGE],
-        ...(maskPrepared ? { temperature: 0.24 as const } : {}),
-        imageConfig,
-      },
-    });
+    let lastError = new Error("Transform failed");
 
-    return extractInlineImageDataUrl(response);
+    for (let i = 0; i < attempts.length; i++) {
+      const att = attempts[i]!;
+      try {
+        const response = await ai.models.generateContent({
+          model: att.model,
+          contents: [{ role: "user", parts }],
+          config: {
+            responseModalities: [Modality.IMAGE],
+            imageConfig: {
+              aspectRatio,
+              ...(att.imageSize ? { imageSize: att.imageSize } : {}),
+            },
+          },
+        });
+        return extractInlineImageDataUrl(response);
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        const msg = lastError.message;
+        const isLast = i === attempts.length - 1;
+        const retriable =
+          msg.includes("IMAGE_OTHER") ||
+          (msg.includes("No image was returned") && !msg.includes("text only"));
+        if (isLast || !retriable) throw lastError;
+        console.warn(
+          `[transformImage] ${att.model}${att.imageSize ? ` ${att.imageSize}` : ""} failed; retrying…`,
+          msg.slice(0, 140),
+        );
+      }
+    }
+
+    throw lastError;
   });
 };

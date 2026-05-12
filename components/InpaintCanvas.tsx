@@ -301,9 +301,9 @@ export const InpaintCanvas = forwardRef<
     >
       <div className="relative shadow-2xl" style={getStageSize()}>
         <canvas ref={imageCanvasRef} className="absolute inset-0 w-full h-full" />
-        <canvas 
-          ref={drawingCanvasRef} 
-          className="absolute inset-0 w-full h-full z-10 pointer-events-none"
+        <canvas
+          ref={drawingCanvasRef}
+          className="absolute inset-0 z-10 h-full w-full touch-none pointer-events-auto"
         />
 
         {mousePos && (
