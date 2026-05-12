@@ -50,7 +50,7 @@ export const QuickActions: React.FC<QuickActionsProps> = ({
   return (
     <div className="space-y-3 mt-3 md:mt-4">
       {presetsBlocked && (
-        <p className="text-[9px] font-bold text-eb-900/80 leading-snug border border-eb-900/20 bg-coral-100/40 px-2 py-2">
+        <p className="text-xs font-bold text-eb-900 leading-snug border border-eb-900/20 bg-coral-100/40 px-2 py-2" role="status">
           {t.presetsBlockedHint}
         </p>
       )}

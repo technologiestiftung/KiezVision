@@ -69,25 +69,28 @@ export const TransformationPanel: React.FC<TransformationPanelProps> = ({
   return (
     <div className="bg-white border-2 border-eb-900 p-0">
       <div className="bg-tsb text-eb-50 px-4 py-2 flex items-center justify-between">
-        <h3 className="text-[10px] font-black flex items-center gap-2">
-          <Wand2 className="w-3 h-3" /> {strings.instruction} {isMaskMode && <span className="text-coral-100">{strings.masked}</span>}
+        <h3 className="text-xs font-black flex items-center gap-2" id="transform-instruction-label">
+          <Wand2 className="w-3 h-3" aria-hidden="true" /> {strings.instruction} {isMaskMode && <span className="text-coral-100">{strings.masked}</span>}
         </h3>
         {prompt && (
           <button 
             type="button" 
             onClick={() => setPrompt('')}
-            className="text-[9px] font-black hover:text-coral-100"
+            className="text-xs font-black hover:text-coral-100"
           >
             {strings.clear}
           </button>
         )}
       </div>
       <form onSubmit={handleSubmit} className="p-4 flex flex-col gap-4">
+        <label htmlFor="transform-prompt" className="sr-only">{strings.instruction}</label>
         <textarea
+          id="transform-prompt"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={placeholder}
-          className="w-full bg-gray-50 text-eb-900 text-sm p-4 border-2 border-eb-900 focus:bg-white outline-none transition-all resize-none h-28 font-bold tracking-tight placeholder:text-eb-900/10"
+          aria-describedby="transform-instruction-label"
+          className="w-full bg-gray-50 text-eb-900 text-sm p-4 border-2 border-eb-900 focus:bg-white transition-all resize-none h-28 font-bold tracking-tight placeholder:text-eb-900/30"
           disabled={isProcessing}
         />
         
@@ -97,7 +100,7 @@ export const TransformationPanel: React.FC<TransformationPanelProps> = ({
               key={s.label}
               type="button"
               onClick={() => addSuggestion(s.value)}
-              className="px-3 h-8 bg-white border-2 border-eb-900 text-[9px] font-black hover:bg-eb-900 hover:text-eb-50 transition-all"
+              className="px-3 h-9 bg-white border-2 border-eb-900 text-xs font-black hover:bg-eb-900 hover:text-eb-50 transition-all"
             >
               {s.label}
             </button>

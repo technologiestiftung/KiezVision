@@ -119,7 +119,7 @@ export const fetchMapillaryImage = async (lat: number, lng: number): Promise<Map
     try {
       const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
       // Fetch multiple to find the best/most recent one
-      const searchUrl = `https://graph.mapillary.com/images?access_token=${MAPILLARY_TOKEN}&fields=id,thumb_2048_url,captured_at,compass_angle&bbox=${bbox}&limit=5`;
+      const searchUrl = `https://graph.mapillary.com/images?access_token=${MAPILLARY_TOKEN}&fields=id,thumb_2048_url,captured_at,compass_angle,is_pano&bbox=${bbox}&is_pano=false&limit=5`;
       
       const response = await fetch(searchUrl);
       const data = await response.json();

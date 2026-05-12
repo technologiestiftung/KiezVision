@@ -1,10 +1,13 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, type KeyboardEvent } from 'react';
 import { GripVertical } from 'lucide-react';
 
 interface BeforeAfterSliderProps {
   originalImage: string;
   modifiedImage: string;
   className?: string;
+  labelBefore?: string;
+  labelAfter?: string;
+  ariaLabelSlider?: string;
 }
 
 /** Same cover logic as InpaintCanvas — image fills container; overflow cropped center. */
@@ -25,6 +28,9 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
   originalImage,
   modifiedImage,
   className = '',
+  labelBefore = 'BEFORE',
+  labelAfter = 'AFTER',
+  ariaLabelSlider = 'Before and after comparison',
 }) => {
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
@@ -77,6 +83,23 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
 
   const handleMouseUp = () => setIsDragging(false);
   const handleTouchEnd = () => setIsDragging(false);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 10 : 2;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSliderPosition((prev) => Math.max(0, prev - step));
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSliderPosition((prev) => Math.min(100, prev + step));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setSliderPosition(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setSliderPosition(100);
+    }
+  }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isDragging) handleMove(e.clientX);
@@ -132,25 +155,33 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
             className="absolute inset-0 w-full h-full object-cover pointer-events-none"
             draggable={false}
           />
-          <div className="absolute top-4 left-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none">
-            BEFORE
-          </div>
-        </div>
-
-        <div className="absolute top-4 right-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-10">
-          AFTER
         </div>
 
         <div
+          role="slider"
+          tabIndex={0}
+          aria-label={ariaLabelSlider}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(sliderPosition)}
+          aria-valuetext={`${Math.round(sliderPosition)}% before, ${Math.round(100 - sliderPosition)}% after`}
           className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize hover:shadow-[0_0_10px_rgba(255,255,255,0.5)] transition-shadow z-20"
           style={{ left: `${sliderPosition}%` }}
           onMouseDown={handleMouseDown}
           onTouchStart={handleTouchStart}
+          onKeyDown={handleKeyDown}
         >
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg transform active:scale-110 transition-transform">
-            <GripVertical className="text-gray-800 w-5 h-5" />
+            <GripVertical className="text-gray-800 w-5 h-5" aria-hidden="true" />
           </div>
         </div>
+      </div>
+
+      <div className="absolute top-4 left-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-30">
+        {labelBefore}
+      </div>
+      <div className="absolute top-4 right-4 bg-eb-900/70 text-eb-50 text-xs font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none z-30">
+        {labelAfter}
       </div>
     </div>
   );

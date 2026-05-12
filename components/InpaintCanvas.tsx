@@ -4,6 +4,8 @@ interface InpaintCanvasProps {
   onOverlayChange: (data: { mask?: string } | null) => void;
   brushSize: number;
   isEraser: boolean;
+  ariaLabel?: string;
+  ariaRoleDescription?: string;
 }
 
 /** On-screen brush: soft #d2d4ff tint, low opacity — mask export still maps strokes to white. */
@@ -12,7 +14,7 @@ const BRUSH_INDICATOR = 'rgba(210, 212, 255, 0.34)';
 export const InpaintCanvas = forwardRef<
   { clear: () => void; getMaskDataUrl: () => string | null; hasMaskPaint: () => boolean },
   InpaintCanvasProps
->(({ image, onOverlayChange, brushSize, isEraser }, ref) => {
+>(({ image, onOverlayChange, brushSize, isEraser, ariaLabel, ariaRoleDescription }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -273,7 +275,10 @@ export const InpaintCanvas = forwardRef<
 
   return (
     <div 
-      ref={containerRef} 
+      ref={containerRef}
+      role="application"
+      aria-label={ariaLabel ?? "Drawing canvas — use mouse or touch to paint the area you want to transform"}
+      aria-roledescription={ariaRoleDescription ?? "drawing canvas"}
       className="absolute inset-0 w-full h-full min-h-0 bg-kv-chrome flex items-center justify-center overflow-hidden cursor-none"
       onMouseMove={(e) => {
         const { clientX, clientY } = e;
@@ -301,9 +306,9 @@ export const InpaintCanvas = forwardRef<
           className="absolute inset-0 w-full h-full z-10 pointer-events-none"
         />
 
-        {/* Brush Preview Cursor */}
         {mousePos && (
-          <div 
+          <div
+            aria-hidden="true"
             className={`fixed pointer-events-none z-50 rounded-full border ${isEraser ? 'mix-blend-normal bg-red-500/20 border-red-500' : 'border-[#b8bce8]/60 mix-blend-normal'}`}
             style={{
               left: mousePos.x,
@@ -315,7 +320,7 @@ export const InpaintCanvas = forwardRef<
               boxShadow: isEraser ? '0 0 10px rgba(239, 68, 68, 0.3)' : '0 0 0 1px rgba(30, 55, 145, 0.12)',
             }}
           >
-            {isEraser && <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-red-500">ERASER</div>}
+            {isEraser && <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-red-500">ERASER</div>}
           </div>
         )}
       </div>
