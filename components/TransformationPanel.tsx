@@ -13,7 +13,6 @@ const SUGGESTIONS_EN = [
   { label: '🌳 Tree', value: 'add a mature street tree with green foliage' },
   { label: '🛝 Playground swing', value: 'add a public playground swing set with metal frame and child-sized seat, on safety surfacing or grass' },
   { label: '🌼 Flower garden', value: 'add a small street-side flower garden with mixed blooms in a low planting bed' },
-  { label: '🗑️ Orange bin', value: 'add Berlin-style orange public litter bins beside street trees, realistic BSR-type street waste containers' },
   { label: '💡 Street Light', value: 'add a modern LED street lamp' },
 ];
 
@@ -21,7 +20,6 @@ const SUGGESTIONS_DE = [
   { label: '🌳 Baum', value: 'einen ausgewachsenen straßenbaum mit grünem laub hinzufügen' },
   { label: '🛝 Schaukel', value: 'eine öffentliche kinderschaukel mit metallgestell und kindersitz, auf fallschutz oder rasen' },
   { label: '🌼 Blumengarten', value: 'einen kleinen straßenrand-blumengarten mit bunten stauden in einer flachen beetanlage hinzufügen' },
-  { label: '🗑️ Orange Tonne', value: 'typische berliner orangefarbene öffentliche mülltonnen (bsr-art) neben straßenbäumen hinzufügen' },
   { label: '💡 Straßenlampe', value: 'eine moderne led-straßenlaterne hinzufügen' },
 ];
 
