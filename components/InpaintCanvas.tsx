@@ -292,8 +292,11 @@ export const InpaintCanvas = forwardRef<
       return { width: '100%', height: '100%' };
     }
 
-    // Cover container: fills frame edge-to-edge; excess cropped by overflow-hidden parent
-    const scale = Math.max(cw / iw, ch / ih);
+    // Portrait: fit entire image in frame; landscape: cover (fill edge-to-edge)
+    const isPortrait = ih > iw;
+    const scale = isPortrait
+      ? Math.min(cw / iw, ch / ih)
+      : Math.max(cw / iw, ch / ih);
     return {
       width: `${iw * scale}px`,
       height: `${ih * scale}px`,

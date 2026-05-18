@@ -10,8 +10,8 @@ interface BeforeAfterSliderProps {
   ariaLabelSlider?: string;
 }
 
-/** Same cover logic as InpaintCanvas — image fills container; overflow cropped center. */
-function getCoverStageSize(
+/** Same sizing as InpaintCanvas — portrait fits in frame; landscape covers. */
+function getStageSize(
   cw: number,
   ch: number,
   iw: number,
@@ -20,7 +20,10 @@ function getCoverStageSize(
   if (!cw || !ch || !iw || !ih) {
     return { width: 0, height: 0 };
   }
-  const scale = Math.max(cw / iw, ch / ih);
+  const isPortrait = ih > iw;
+  const scale = isPortrait
+    ? Math.min(cw / iw, ch / ih)
+    : Math.max(cw / iw, ch / ih);
   return { width: iw * scale, height: ih * scale };
 }
 
@@ -62,7 +65,7 @@ export const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({
     img.src = modifiedImage;
   }, [modifiedImage]);
 
-  const stage = getCoverStageSize(
+  const stage = getStageSize(
     containerSize.width,
     containerSize.height,
     imageSize.width,
