@@ -4,7 +4,7 @@ import {
   type GenerateContentResponse,
   type Part,
 } from "@google/genai";
-import { MASK_EDGE_COMPLETION } from "./presetRules";
+import { MASK_EDGE_COMPLETION, presetAllowsNewObjects } from "./presetRules";
 import { buildAreaEditInstruction } from "../areaEdit/prompts/buildOperationPrompt";
 import {
   enrichAreaEditPrompt,
@@ -597,6 +597,10 @@ export const transformImage = async (
   const refMeta = mimeAndBase64FromDataUrl(imageBase64);
   const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
 
+  const placementHint = presetAllowsNewObjects(userPrompt)
+    ? "Ground any new elements on the correct surface (paving, asphalt, plaza) with believable size and perspective relative to doors, windows, curbs, and vehicles. Bicycle racks belong on the sidewalk edge beside the curb; benches stay set back from the curb; never overlap racks and benches."
+    : "Do not add, remove, or relocate physical objects except exactly as instructed. Change only lighting, sky, weather, or the specific removal described — no trees, benches, bike racks, water, or street dressing.";
+
   const parts: Part[] = [
     {
       inlineData: {
@@ -607,7 +611,7 @@ export const transformImage = async (
     {
       text: `Transform this image based on: ${userPrompt}. 
       Maintain the original scene structure and especially the buildings. Do NOT change any architecture unless explicitly told to.
-      Ground any new elements on the correct surface (paving, asphalt, plaza) with believable size and perspective relative to doors, windows, curbs, and vehicles.
+      ${placementHint}
       ${NO_CROP_IMAGE_HINT}
       ${NO_BLURRY_ARTIFACTS_HINT}
       CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,

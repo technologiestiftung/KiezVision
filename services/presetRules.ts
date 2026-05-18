@@ -50,8 +50,29 @@ const GLOBAL_CONSTRAINTS = [
   SPATIAL_AWARENESS,
 ].join(" ");
 
+/** Every preset: no scope creep into unrelated objects or “street dressing”. */
+export const PRESET_SCOPE_LOCK =
+  "Apply ONLY what this preset describes. Do NOT add unrelated trees, benches, bike racks, planters, water, canals, new vehicles, people, bins, café furniture, or other street dressing unless this preset explicitly asks for that category. Keep existing scene content unless the preset says to remove or replace it.";
+
+/** Benches vs racks: separate zones, racks at the street edge. */
+export const STREET_FURNITURE_SEPARATION =
+  "Never overlap or stack benches and bicycle racks. Keep at least ~1.5 m clear space between a bench and the nearest rack. Bicycle racks belong on the sidewalk edge beside the curb/carriageway (street side), not in the middle of the footway and not directly in front of benches.";
+
 export const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
+  [TransformationType.SUNNY_DAY]: [
+    PRESET_SCOPE_LOCK,
+    "Change ONLY sky, sun direction, exposure, color temperature, and shadows to a bright clear summer afternoon.",
+    "Forbidden: adding or removing trees, plants, benches, bike racks, water, vehicles, people, signs, façades changes, or any new physical objects.",
+    "Keep the same buildings, pavement layout, and street furniture as the reference; relight them only.",
+  ].join(" "),
+  [TransformationType.REMOVE_CARS]: [
+    PRESET_SCOPE_LOCK,
+    "Remove cars, trucks, vans, and other motor vehicles from the carriageway only; fill gaps with consistent asphalt or paving.",
+    "Forbidden: adding trees, benches, bike racks, water, people, or other new street elements.",
+    "Do not change weather, sky, or building architecture.",
+  ].join(" "),
   [TransformationType.ADD_TREES]: [
+    PRESET_SCOPE_LOCK,
     "Add nature only where it fits.",
     "Align planters and tree pits with the sidewalk plane; tree trunks vertical in world space, canopy volume plausible for the distance to facades and overhead wires.",
     "Allowed: sidewalks/curb edges (street trees, planter boxes), road surface (green corridor / pocket-park conversions), around street furniture (small planters), and rooftops/terraces when visible.",
@@ -60,6 +81,7 @@ export const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
     "Fallback: if no balconies/rooftops are visible, keep all greenery on sidewalks/curb edges and street-level areas only.",
   ].join(" "),
   [TransformationType.ADD_WATER]: [
+    PRESET_SCOPE_LOCK,
     "Add water only where it fits.",
     "Water surface must lie in the horizontal plane of the roadway or basin it replaces; match reflections and horizon to the existing scene lighting.",
     "Prefer: transform the road surface into a clear canal/waterway while keeping sidewalks and buildings intact.",
@@ -68,21 +90,24 @@ export const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
     "Fallback: if uncertain, confine all water strictly to the road surface and curbside drainage features.",
   ].join(" "),
   [TransformationType.ADD_BENCH]: [
-    "Add one or more realistic public park benches along the sidewalk or plaza, matching the local street style and materials.",
+    PRESET_SCOPE_LOCK,
+    "Add one or more realistic public park benches only — do not add bike racks, trees, or other furniture in the same edit.",
     "Render benches with sharp, clean edges and legible slats/hardware; avoid glow, haze, or soft bloom around the furniture.",
     "Seat height and depth must match adult ergonomics relative to doors or people in frame; orient benches parallel to the dominant curb or facade line unless the layout clearly dictates otherwise.",
-    "Place benches only where they fit.",
+    "Place benches on the building-side half of the sidewalk or plaza (set back from the curb), leaving the curb edge free for bicycle parking.",
+    STREET_FURNITURE_SEPARATION,
     "Allowed: sidewalks, plazas, wide curb strips, tram/bus waiting areas, and pocket parks.",
-    "Forbidden: blocking driveways, bike lanes, crosswalks, doorways, or vehicle lanes.",
+    "Forbidden: blocking driveways, bike lanes, crosswalks, doorways, vehicle lanes, or placing benches on the street-edge strip where racks belong.",
     "Keep benches grounded, correctly scaled, and consistent with Berlin-style street furniture.",
   ].join(" "),
   [TransformationType.ADD_BIKE_RACK]: [
-    "Add practical bicycle parking such as metal U-racks or staple racks on the sidewalk, spaced realistically for several bikes.",
+    PRESET_SCOPE_LOCK,
+    "Add practical bicycle parking only (metal U-racks or staple racks) — do not add benches, trees, or other furniture in the same edit.",
     "Keep metal tubes and welds crisp with sharp edges; avoid fuzzy or painterly blur on the rack silhouette.",
     "Mount racks flush to the paving plane; spacing between loops should fit real bicycle lengths (~1.6–1.9m) at the scale implied by the photo.",
-    "Place racks only where they fit.",
-    "Allowed: sidewalks set back from the curb, plaza edges, and transit stops where racks are common.",
-    "Forbidden: blocking pedestrian flow, wheelchair routes, hydrants, or vehicle lanes.",
+    "Place every rack on the sidewalk edge adjacent to the curb or carriageway (street side of the footway), aligned parallel to the road — typical Berlin curbside parking.",
+    STREET_FURNITURE_SEPARATION,
+    "Forbidden: mid-sidewalk placement, blocking pedestrian flow, wheelchair routes, hydrants, doorways, vehicle lanes, or overlapping existing benches.",
     "Use realistic metal racks (loops, staples, or grid stands) anchored to the pavement; do not attach racks to glass facades.",
   ].join(" "),
 };
@@ -118,14 +143,29 @@ export function buildTransformPrompt(
   if (isPresetPrompt(base)) {
     const addon = PRESET_ADDONS[base];
     if (addon) {
-      return `${GLOBAL_CONSTRAINTS} ${addon}`;
+      return `${GLOBAL_CONSTRAINTS} ${base} ${addon}`;
     }
+    return `${GLOBAL_CONSTRAINTS} ${PRESET_SCOPE_LOCK} ${base}`;
   }
 
   return `${GLOBAL_CONSTRAINTS} ${base}`;
 }
 
 /** Area edit: user/preset request only — mask rules are sent separately in the API template. */
+/** False for weather-only or vehicle-removal presets (no new street furniture). */
+export function presetAllowsNewObjects(finalPrompt: string): boolean {
+  if (/Change ONLY sky|Adjust only weather and lighting/i.test(finalPrompt)) {
+    return false;
+  }
+  if (
+    /Remove cars, trucks/i.test(finalPrompt) &&
+    /Forbidden: adding trees, benches, bike racks/i.test(finalPrompt)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function buildMaskTransformRequest(inputPrompt: string): string {
   const base = inputPrompt.trim();
   if (!base) return base;

@@ -1,6 +1,10 @@
 import type { AreaEditOperation } from '../types';
 import { TransformationType } from '../../types';
-import { PRESET_ADDONS, isPresetPrompt } from '../../services/presetRules';
+import {
+  PRESET_ADDONS,
+  PRESET_SCOPE_LOCK,
+  isPresetPrompt,
+} from '../../services/presetRules';
 
 type SubjectHint = { pattern: RegExp; hint: string };
 
@@ -12,11 +16,15 @@ const SUBJECT_HINTS: SubjectHint[] = [
   },
   {
     pattern: /bench|sitzbank/i,
-    hint: 'Render a public park bench with seat/back slats, grounded on pavement, adult scale relative to doors or people — not playground equipment.',
+    hint: 'Render a public park bench with seat/back slats on the building-side of the sidewalk (set back from curb). Do not add bike racks; keep clear of any existing racks.',
   },
   {
     pattern: /bike\s*rack|bicycle\s*parking|fahrradständer|fahrradbügel/i,
-    hint: 'Render metal U-racks or staple bicycle stands anchored in the pavement, not benches or playground items.',
+    hint: 'Render metal U-racks or staple stands only on the sidewalk edge beside the curb (street side). Do not add benches or overlap existing benches.',
+  },
+  {
+    pattern: /sunny|sunlight|bright\s+day|summer\s+afternoon|sonnig|sonnen/i,
+    hint: 'Change only sky, light, and shadows — do not add trees, benches, racks, water, people, or other objects.',
   },
   {
     pattern: /tree|baum|planter|shrub|hedge|hecke|flower|blumen|garden|beet/i,
@@ -70,7 +78,7 @@ export function enrichAreaEditPrompt(rawPrompt: string): string {
 
   if (isPresetPrompt(base)) {
     const addon = PRESET_ADDONS[base as TransformationType];
-    return addon ? `${base} ${addon}` : base;
+    return addon ? `${base} ${PRESET_SCOPE_LOCK} ${addon}` : `${base} ${PRESET_SCOPE_LOCK}`;
   }
 
   let enriched = base;
