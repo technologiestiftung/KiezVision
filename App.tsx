@@ -48,7 +48,11 @@ import {
   fetchMapillaryImage,
   reverseGeocodeLocation,
 } from "./services/mapillaryService";
-import { buildTransformPrompt } from "./services/presetRules";
+import {
+  buildTransformPrompt,
+} from "./services/presetRules";
+import { runAreaEdit } from "./areaEdit";
+import { toDisplayableDataUrl } from "./services/imageUtils";
 import {
   isFileSystemAccessSupported,
   getRootHandleSilently,
@@ -821,11 +825,18 @@ export default function App() {
 
   useEffect(() => {
     const checkKey = async () => {
+      const envKey =
+        process.env.GEMINI_API_KEY ||
+        process.env.CUSTOM_GEMINI_API_KEY ||
+        process.env.API_KEY;
+      if (envKey) {
+        setHasApiKey(true);
+        return;
+      }
       if (window.aistudio) {
         const selected = await window.aistudio.hasSelectedApiKey();
         setHasApiKey(selected);
       } else {
-        // Fallback for local dev if window.aistudio is missing
         setHasApiKey(true);
       }
     };
@@ -882,6 +893,36 @@ export default function App() {
   useEffect(() => {
     setIsAreaEditEraser(false);
   }, [inpaintMountKey]);
+
+  /** Remote Mapillary URLs cannot be painted until converted to a data URL (CORS). */
+  useEffect(() => {
+    if (editMode !== "mask" || !currentImage || currentImage.startsWith("data:")) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const dataUrl = await toDisplayableDataUrl(currentImage);
+        if (cancelled || dataUrl === currentImage) return;
+        setCurrentImage(dataUrl);
+        if (originalImage === currentImage) {
+          setOriginalImage(dataUrl);
+        }
+        setInpaintMountKey((k) => k + 1);
+      } catch {
+        if (!cancelled) {
+          setError(
+            language === "en"
+              ? "Could not prepare this photo for area edit. Upload the image or search again."
+              : "Foto konnte nicht für Bereich bearbeiten vorbereitet werden. Bitte Bild hochladen oder erneut suchen.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editMode, currentImage, originalImage, language]);
 
   useEffect(() => {
     document.documentElement.lang = language;
@@ -1249,7 +1290,7 @@ export default function App() {
         }
 
         if (mData) {
-          imageData = mData.url;
+          imageData = await toDisplayableDataUrl(mData.url);
           source = language === "en" ? "Mapillary Real Image" : "Echtes Bild";
           mMeta = { link: mData.link, capturedAt: mData.capturedAt };
         }
@@ -1481,13 +1522,18 @@ export default function App() {
     setError(null);
 
     try {
+      const imageForRun = await toDisplayableDataUrl(currentImage);
+      if (imageForRun !== currentImage) {
+        setCurrentImage(imageForRun);
+        if (originalImage === currentImage) {
+          setOriginalImage(imageForRun);
+        }
+      }
+
       let maskForRun: string | null = null;
       if (editMode === "mask") {
-        const painted = canvasRef.current?.hasMaskPaint?.() ?? false;
-        maskForRun = painted
-          ? (canvasRef.current?.getMaskDataUrl?.() ?? null)
-          : null;
-        if (!maskForRun) {
+        const hasPaint = canvasRef.current?.hasMaskPaint?.() ?? false;
+        if (!hasPaint) {
           setError(
             language === "en"
               ? "Paint an area on the image first (Area Edit brush)."
@@ -1495,37 +1541,56 @@ export default function App() {
           );
           return;
         }
-      }
-
-      const aspectRatio = await getBestAspectRatio(currentImage);
-      const finalPrompt = buildTransformPrompt(prompt, { editMode });
-      const newImageDataRaw = await transformImage(
-        currentImage,
-        finalPrompt,
-        editMode === "mask" ? maskForRun : null,
-        highQuality,
-        aspectRatio,
-      );
-
-      // OPTIMIZATION: If we used a mask, strictly composite the new data onto the original area
-      // this prevents the AI from changing unmasked pixels like buildings.
-      let finalImageData = newImageDataRaw;
-      if (maskForRun) {
-        try {
-          finalImageData = await compositeImageWithMask(
-            currentImage,
-            newImageDataRaw,
-            maskForRun,
-          );
-        } catch (compErr) {
-          console.warn("Mask composition failed:", compErr);
+        maskForRun = canvasRef.current?.getMaskDataUrl?.() ?? maskBase64;
+        if (!maskForRun) {
           setError(
             language === "en"
-              ? "Could not limit the AI result to your brush. Try again or use a smaller image."
-              : "Das Ergebnis konnte nicht auf den Pinselbereich beschränkt werden. Bitte erneut versuchen oder ein kleineres Bild nutzen.",
+              ? "Could not read the brush mask. Paint again or reload the image."
+              : "Pinselmaske konnte nicht gelesen werden. Bitte erneut malen oder Bild neu laden.",
           );
           return;
         }
+      }
+
+      let finalImageData: string;
+
+      if (maskForRun) {
+        try {
+          const areaResult = await runAreaEdit({
+            originalImageUrl: imageForRun,
+            selection: { kind: "raster", dataUrl: maskForRun },
+            prompt,
+            options: {
+              highQuality,
+              modelTemperature: 0.4,
+            },
+          });
+          finalImageData = areaResult.dataUrl;
+        } catch (areaErr: unknown) {
+          const msg =
+            areaErr instanceof Error
+              ? areaErr.message
+              : String(areaErr);
+          if (msg.includes("MASK_GEOMETRY") || msg.includes("does not match")) {
+            setError(
+              language === "en"
+                ? "Brush mask does not match the image size. Clear the mask and paint again."
+                : "Pinselmaske passt nicht zur Bildgröße. Maske löschen und erneut malen.",
+            );
+            return;
+          }
+          throw areaErr;
+        }
+      } else {
+        const aspectRatio = await getBestAspectRatio(imageForRun);
+        const finalPrompt = buildTransformPrompt(prompt, { editMode });
+        finalImageData = await transformImage(
+          imageForRun,
+          finalPrompt,
+          null,
+          highQuality,
+          aspectRatio,
+        );
       }
 
       const label = editMode === "mask" ? "Area" : "Full";
@@ -1544,10 +1609,13 @@ export default function App() {
 
       if (maskForRun) {
         canvasRef.current?.clear();
+        setMaskBase64(null);
+        setInpaintMountKey((k) => k + 1);
+        // Stay in Area Edit so the next brush stroke defines a new mask only.
+      } else {
+        setEditMode("comparison");
+        setMaskBase64(null);
       }
-      // Reset tools
-      setEditMode("comparison");
-      setMaskBase64(null);
     } catch (err: any) {
       const isQuotaError =
         err.message?.toLowerCase().includes("429") ||
@@ -1566,7 +1634,6 @@ export default function App() {
       } else {
         setError(err.message || t.errorFailedTransform);
       }
-      throw err instanceof Error ? err : new Error(String(err));
     } finally {
       setProcessing({ isProcessing: false });
     }

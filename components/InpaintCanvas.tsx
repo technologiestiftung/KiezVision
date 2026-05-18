@@ -10,6 +10,8 @@ interface InpaintCanvasProps {
 
 /** On-screen brush: soft #d2d4ff tint, low opacity — mask export still maps strokes to white. */
 const BRUSH_INDICATOR = 'rgba(210, 212, 255, 0.34)';
+/** Luminance above this = painted mask (do not use alpha alone — opaque black is alpha 255 too). */
+const MASK_LUM_THRESHOLD = 12;
 
 export const InpaintCanvas = forwardRef<
   { clear: () => void; getMaskDataUrl: () => string | null; hasMaskPaint: () => boolean },
@@ -29,6 +31,7 @@ export const InpaintCanvas = forwardRef<
   const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
+  const [imageLoadError, setImageLoadError] = useState(false);
 
   const hasMaskPaint = (): boolean => {
     const canvas = drawingCanvasRef.current;
@@ -39,7 +42,8 @@ export const InpaintCanvas = forwardRef<
     const step = px > 3_000_000 ? 64 : px > 1_000_000 ? 32 : 4;
     for (let i = 0; i < data.length; i += step) {
       const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      if (lum > 12) return true;
+      const a = data[i + 3];
+      if (a > 8 && lum > MASK_LUM_THRESHOLD) return true;
     }
     return false;
   };
@@ -72,7 +76,8 @@ export const InpaintCanvas = forwardRef<
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
       const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      if (brightness > 10) {
+      // Only luminance — opaque black background is alpha 255 but must stay black.
+      if (brightness > MASK_LUM_THRESHOLD) {
         data[i] = 255;
         data[i + 1] = 255;
         data[i + 2] = 255;
@@ -108,13 +113,13 @@ export const InpaintCanvas = forwardRef<
     onOverlayChange(null);
 
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.onload = () => {
       if (loadId !== imageLoadGenRef.current) return;
       const imgCanvas = imageCanvasRef.current;
       const drwCanvas = drawingCanvasRef.current;
       if (!imgCanvas || !drwCanvas) return;
 
+      setImageLoadError(false);
       setImageSize({ width: img.width, height: img.height });
 
       imgCanvas.width = img.width;
@@ -132,6 +137,7 @@ export const InpaintCanvas = forwardRef<
     img.onerror = () => {
       if (loadId !== imageLoadGenRef.current) return;
       baseImageReadyRef.current = false;
+      setImageLoadError(true);
     };
     img.src = image;
   }, [image, onOverlayChange]);
@@ -212,11 +218,15 @@ export const InpaintCanvas = forwardRef<
     lastStrokePointRef.current = { x, y };
   };
 
-  const updateOverlays = () => {
+  const updateOverlays = useCallback(() => {
     if (!baseImageReadyRef.current) return;
+    if (!hasMaskPaint()) {
+      onOverlayChange(null);
+      return;
+    }
     const dataUrl = buildMaskDataUrlFromDrawing();
     if (dataUrl) onOverlayChange({ mask: dataUrl });
-  };
+  }, [onOverlayChange]);
 
   const stopDrawing = () => {
     setMousePos(null);
@@ -254,6 +264,23 @@ export const InpaintCanvas = forwardRef<
     updateOverlays();
   };
 
+  useEffect(() => {
+    const endStroke = () => {
+      if (!isDrawingRef.current) return;
+      isDrawingRef.current = false;
+      lastStrokePointRef.current = null;
+      if (baseImageReadyRef.current) {
+        updateOverlays();
+      }
+    };
+    window.addEventListener("mouseup", endStroke);
+    window.addEventListener("touchend", endStroke);
+    return () => {
+      window.removeEventListener("mouseup", endStroke);
+      window.removeEventListener("touchend", endStroke);
+    };
+  }, [updateOverlays]);
+
   const getVisualBrushSize = () => {
     return brushSize * 2;
   };
@@ -280,30 +307,30 @@ export const InpaintCanvas = forwardRef<
       aria-label={ariaLabel ?? "Drawing canvas — use mouse or touch to paint the area you want to transform"}
       aria-roledescription={ariaRoleDescription ?? "drawing canvas"}
       className="absolute inset-0 w-full h-full min-h-0 bg-kv-chrome flex items-center justify-center overflow-hidden cursor-none"
-      onMouseMove={(e) => {
-        const { clientX, clientY } = e;
-        setMousePos({ x: clientX, y: clientY });
-        if (isDrawingRef.current) draw(e);
-      }}
-      onMouseEnter={(e) => {
-        const { clientX, clientY } = e;
-        setMousePos({ x: clientX, y: clientY });
-      }}
-      onMouseUp={stopDrawing}
-      onMouseLeave={() => {
-        setMousePos(null);
-        stopDrawing();
-      }}
-      onMouseDown={startDrawing}
-      onTouchStart={startDrawing}
-      onTouchMove={draw}
-      onTouchEnd={stopDrawing}
+      onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+      onMouseEnter={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setMousePos(null)}
     >
+      {imageLoadError && (
+        <p className="absolute inset-0 z-20 flex items-center justify-center p-6 text-center text-sm font-bold text-eb-900 bg-eb-50/90">
+          Image could not load for painting. Reload the photo or upload a file instead.
+        </p>
+      )}
       <div className="relative shadow-2xl" style={getStageSize()}>
-        <canvas ref={imageCanvasRef} className="absolute inset-0 w-full h-full" />
+        <canvas ref={imageCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
         <canvas
           ref={drawingCanvasRef}
-          className="absolute inset-0 z-10 h-full w-full touch-none pointer-events-auto"
+          className="absolute inset-0 z-10 h-full w-full touch-none cursor-none"
+          onMouseDown={startDrawing}
+          onMouseMove={(e) => {
+            setMousePos({ x: e.clientX, y: e.clientY });
+            draw(e);
+          }}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
         />
 
         {mousePos && (

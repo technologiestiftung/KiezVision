@@ -34,7 +34,7 @@ export const MASK_ROW_RETAIL_FACADES =
 export const MASK_REFERENCE_GEOMETRY =
   "Fit the edit to the real area behind the brush: keep storefront bay width, wall plane, perspective, and ground line; preserve door and window positions unless the user explicitly asks to change structure. Re-skin the existing opening rather than pasting a wrongly scaled façade.";
 
-const SPATIAL_AWARENESS = [
+export const SPATIAL_AWARENESS = [
   "Read the photograph as a 3D scene: separate sidewalk from carriageway using curbs, curb cuts, lane markings, and where building walls meet the ground.",
   "Place every addition on the correct supporting surface (paving, asphalt, plaza tiles) with full ground contact and consistent perspective / vanishing lines — nothing floating above the floor.",
   "Infer scale from visible cues (door and storefront heights, windows, cars, people, bike wheels); street furniture must look human-sized with believable depth and footprint for the free space.",
@@ -50,7 +50,7 @@ const GLOBAL_CONSTRAINTS = [
   SPATIAL_AWARENESS,
 ].join(" ");
 
-const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
+export const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
   [TransformationType.ADD_TREES]: [
     "Add nature only where it fits.",
     "Align planters and tree pits with the sidewalk plane; tree trunks vertical in world space, canopy volume plausible for the distance to facades and overhead wires.",
@@ -87,7 +87,7 @@ const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
   ].join(" "),
 };
 
-function isPresetPrompt(prompt: string): prompt is TransformationType {
+export function isPresetPrompt(prompt: string): prompt is TransformationType {
   return (Object.values(TransformationType) as string[]).includes(prompt);
 }
 
@@ -123,4 +123,15 @@ export function buildTransformPrompt(
   }
 
   return `${GLOBAL_CONSTRAINTS} ${base}`;
+}
+
+/** Area edit: user/preset request only — mask rules are sent separately in the API template. */
+export function buildMaskTransformRequest(inputPrompt: string): string {
+  const base = inputPrompt.trim();
+  if (!base) return base;
+  if (isPresetPrompt(base)) {
+    const addon = PRESET_ADDONS[base];
+    if (addon) return `${base} ${addon}`;
+  }
+  return base;
 }

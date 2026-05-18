@@ -4,15 +4,18 @@ import {
   type GenerateContentResponse,
   type Part,
 } from "@google/genai";
+import { MASK_EDGE_COMPLETION } from "./presetRules";
+import { buildAreaEditInstruction } from "../areaEdit/prompts/buildOperationPrompt";
 import {
-  MASK_BLACK_UNCHANGED,
-  MASK_CURRENT_MAP_ONLY,
-  MASK_EDGE_COMPLETION,
-  MASK_NO_UNREQUESTED_EXTRAS,
-  MASK_REFERENCE_GEOMETRY,
-  MASK_ROW_RETAIL_FACADES,
-  MASK_SPATIAL_SCOPE,
-} from "./presetRules";
+  enrichAreaEditPrompt,
+  inferAreaEditOperation,
+} from "../areaEdit/prompts/enrichUserPrompt";
+import {
+  cropDataUrlToBBox,
+  embedCropInFullFrame,
+  extractMaskBoundingBox,
+} from "./maskCropInpaint";
+import { loadImageElement, resizeDataUrlToDimensions } from "./imageUtils";
 
 /** Values supported by Gemini image `imageConfig.aspectRatio` (see @google/genai ImageConfig). */
 export type GeminiImageAspectRatio =
@@ -140,15 +143,35 @@ const mimeAndBase64FromDataUrl = (
 };
 
 /** Inpainting: keep API inputs moderate — large photos + preview models often fail (IMAGE_OTHER). */
-const MAX_MASK_INPUT_DIMENSION_FOR_API = 1024;
+const MAX_MASK_INPUT_DIMENSION_FOR_API = 1280;
 
-function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Failed to decode image for API resize"));
-    img.src = dataUrl;
-  });
+const ASPECT_RATIO_TARGETS: { label: GeminiImageAspectRatio; r: number }[] = [
+  { label: "21:9", r: 21 / 9 },
+  { label: "16:9", r: 16 / 9 },
+  { label: "3:2", r: 3 / 2 },
+  { label: "4:3", r: 4 / 3 },
+  { label: "1:1", r: 1 },
+  { label: "3:4", r: 3 / 4 },
+  { label: "2:3", r: 2 / 3 },
+  { label: "9:16", r: 9 / 16 },
+];
+
+function pickAspectRatioForDimensions(
+  width: number,
+  height: number,
+): GeminiImageAspectRatio {
+  if (!width || !height) return "4:3";
+  const ratio = width / height;
+  let best: GeminiImageAspectRatio = "4:3";
+  let bestScore = Infinity;
+  for (const { label, r } of ASPECT_RATIO_TARGETS) {
+    const score = Math.abs(Math.log(ratio / r));
+    if (score < bestScore) {
+      bestScore = score;
+      best = label;
+    }
+  }
+  return best;
 }
 
 /** Downscale reference + mask together so registration is preserved. */
@@ -161,7 +184,7 @@ async function scaleRefAndMaskForImageModel(
     return { ref: refDataUrl, mask: maskDataUrl ?? null };
   }
   try {
-    const refImg = await loadImageFromDataUrl(refDataUrl);
+    const refImg = await loadImageElement(refDataUrl);
     const w = refImg.naturalWidth;
     const h = refImg.naturalHeight;
     if (!w || !h) return { ref: refDataUrl, mask: maskDataUrl ?? null };
@@ -175,12 +198,14 @@ async function scaleRefAndMaskForImageModel(
     canvas.height = nh;
     const ctx = canvas.getContext("2d");
     if (!ctx) return { ref: refDataUrl, mask: maskDataUrl ?? null };
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(refImg, 0, 0, nw, nh);
-    const scaledRef = canvas.toDataURL("image/jpeg", 0.9);
+    const scaledRef = canvas.toDataURL("image/png");
 
     let scaledMask: string | null = maskDataUrl ?? null;
     if (scaledMask) {
-      const mImg = await loadImageFromDataUrl(scaledMask);
+      const mImg = await loadImageElement(scaledMask);
       const mc = document.createElement("canvas");
       mc.width = nw;
       mc.height = nh;
@@ -374,7 +399,7 @@ export const generateImage = async (
  * Multimodal parts for inpainting: text + ref + mask (rules aligned with presetRules mask mode).
  */
 function buildMaskEditParts(
-  userPromptInline: string,
+  instructionText: string,
   refMime: string,
   maskMime: string,
   refB64: string,
@@ -382,14 +407,9 @@ function buildMaskEditParts(
 ): Part[] {
   return [
     {
-      text: `PRIMARY EDIT REQUEST — apply exactly this change in this single generation:
-"""${userPromptInline}"""
+      text: `${instructionText}
 
-The next two parts are images in order:
-(1) REFERENCE PHOTO — full current scene to edit.
-(2) LOCATION MAP — same pixel grid as (1). ${MASK_CURRENT_MAP_ONLY} White = minimum region for your edit; black = leave the reference unchanged in parts of the scene clearly away from that edit. ${MASK_IS_LOCATION_ONLY} ${MASK_BLACK_UNCHANGED} ${MASK_EDGE_COMPLETION} ${MASK_NO_UNREQUESTED_EXTRAS} ${MASK_SPATIAL_SCOPE} ${MASK_REFERENCE_GEOMETRY} ${MASK_ROW_RETAIL_FACADES} Do not add unrelated global atmosphere or “street dressing” far from the brushed zone.
-
-Return ONE full-frame image: distant black-map areas match (1); the requested change appears centered on white with a modest completion band so poles, awnings, and furniture are not clipped at the stroke line. ${WHOLE_SCENE_COHERENCE_MASK} ${NO_CROP_IMAGE_HINT} ${NO_BLURRY_ARTIFACTS_HINT} No text or watermarks.`,
+CRITICAL: The visible edit MUST appear inside every white pixel of image 2 — not only at the edges of the frame. Black mask areas must match image 1. ${MASK_IS_LOCATION_ONLY} ${MASK_EDGE_COMPLETION} ${WHOLE_SCENE_COHERENCE_MASK} ${NO_BLURRY_ARTIFACTS_HINT} No text or watermarks.`,
     },
     {
       inlineData: {
@@ -406,6 +426,146 @@ Return ONE full-frame image: distant black-map areas match (1); the requested ch
   ];
 }
 
+const MASK_AREA_MODELS = [
+  "gemini-2.5-flash-image",
+  "gemini-2.0-flash-preview-image-generation",
+];
+
+async function generateMaskedFrame(
+  ai: GoogleGenAI,
+  imageBase64: string,
+  maskBase64: string,
+  instruction: string,
+  maxDim: number,
+  temperatures: number[],
+): Promise<string> {
+  const scaled = await scaleRefAndMaskForImageModel(
+    imageBase64,
+    maskBase64,
+    maxDim,
+  );
+  const refImg = await loadImageElement(scaled.ref);
+
+  const [imagePrepared, maskPrepared] = await Promise.all([
+    ensureBase64(scaled.ref),
+    scaled.mask ? ensureBase64(scaled.mask) : Promise.resolve(null),
+  ]);
+  if (!maskPrepared) {
+    throw new Error("Mask could not be prepared for area edit.");
+  }
+  const refMeta = mimeAndBase64FromDataUrl(scaled.ref);
+  const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
+  const maskMeta = scaled.mask ? mimeAndBase64FromDataUrl(scaled.mask) : null;
+  const maskMime = maskMeta?.mimeType ?? maskPrepared.mimeType ?? "image/png";
+
+  const parts = buildMaskEditParts(
+    instruction,
+    refMime,
+    maskMime,
+    imagePrepared.base64,
+    maskPrepared.base64,
+  );
+
+  let lastError = new Error("Area transform failed");
+  let attempt = 0;
+  const maxAttempts =
+    MASK_AREA_MODELS.length * Math.max(temperatures.length, 1);
+
+  for (const model of MASK_AREA_MODELS) {
+    for (const temp of temperatures) {
+      attempt++;
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts }],
+          config: {
+            responseModalities: [Modality.IMAGE],
+            temperature: temp,
+          },
+        });
+        const raw = extractInlineImageDataUrl(response);
+        return resizeDataUrlToDimensions(
+          raw,
+          refImg.naturalWidth,
+          refImg.naturalHeight,
+        );
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        if (attempt >= maxAttempts) throw lastError;
+        console.warn(
+          `[transformImage] area edit ${attempt}/${maxAttempts} (${model}, maxDim=${maxDim}, temp=${temp}):`,
+          lastError.message.slice(0, 140),
+        );
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Crop around the brush so the mask covers more of the frame, then paste the result back.
+ */
+async function runMaskedInpaintGeneration(
+  imageBase64: string,
+  maskBase64: string,
+  instruction: string,
+): Promise<string> {
+  const ai = getAiClient();
+  const fullRef = await loadImageElement(imageBase64);
+  const fw = fullRef.naturalWidth;
+  const fh = fullRef.naturalHeight;
+
+  const bbox = await extractMaskBoundingBox(maskBase64, fw, fh);
+  const useCrop = bbox !== null && bbox.areaFraction < 0.82;
+
+  const plans: { maxDim: number; temperatures: number[] }[] = [
+    { maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API, temperatures: [0.35, 0.5] },
+    { maxDim: 768, temperatures: [0.4, 0.55] },
+  ];
+
+  let lastError = new Error("Area transform failed");
+
+  for (const plan of plans) {
+    try {
+      if (useCrop && bbox) {
+        const cropRef = await cropDataUrlToBBox(imageBase64, bbox);
+        const cropMask = await cropDataUrlToBBox(maskBase64, bbox);
+        const cropInstruction = `${instruction}
+
+Tight crop around the edit zone. Keep the new content anchored to the same ground position and scale as in the reference crop — do not shift or float the subject. White mask pixels must show a sharp, visible version of the requested change (not a copy of the reference). Match reference sharpness and grain.`;
+        const cropOut = await generateMaskedFrame(
+          ai,
+          cropRef,
+          cropMask,
+          cropInstruction,
+          plan.maxDim,
+          plan.temperatures,
+        );
+        const cropW = bbox.x1 - bbox.x0 + 1;
+        const cropH = bbox.y1 - bbox.y0 + 1;
+        const cropFit = await resizeDataUrlToDimensions(cropOut, cropW, cropH);
+        return embedCropInFullFrame(imageBase64, cropFit, bbox);
+      }
+
+      const fullOut = await generateMaskedFrame(
+        ai,
+        imageBase64,
+        maskBase64,
+        instruction,
+        plan.maxDim,
+        plan.temperatures,
+      );
+      return resizeDataUrlToDimensions(fullOut, fw, fh);
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+      console.warn("[runMaskedInpaintGeneration] plan failed:", lastError.message.slice(0, 160));
+    }
+  }
+
+  throw lastError;
+}
+
 /**
  * Transforms an existing image, optionally using a mask for inpainting or a sketch for visual guidance.
  */
@@ -419,70 +579,17 @@ export const transformImage = async (
   const userPrompt = prompt.replace(/"""+/g, '"').trim();
 
   if (maskBase64) {
-    return callWithRetry(async () => {
-      const ai = getAiClient();
-      const plans: { maxDim: number; temperatures: number[] }[] = [
-        { maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API, temperatures: [0.28, 0.42] },
-        { maxDim: 768, temperatures: [0.36, 0.5] },
-      ];
-      let lastError = new Error("Area transform failed");
+    const instruction =
+      userPrompt.includes("LOCAL INPAINTING") || userPrompt.includes("WHITE/LIGHT")
+        ? userPrompt
+        : buildAreaEditInstruction(
+            enrichAreaEditPrompt(userPrompt),
+            inferAreaEditOperation(userPrompt),
+          );
 
-      for (let pi = 0; pi < plans.length; pi++) {
-        const plan = plans[pi]!;
-        const scaled = await scaleRefAndMaskForImageModel(
-          imageBase64,
-          maskBase64,
-          plan.maxDim,
-        );
-        const [imagePrepared, maskPrepared] = await Promise.all([
-          ensureBase64(scaled.ref),
-          scaled.mask ? ensureBase64(scaled.mask) : Promise.resolve(null),
-        ]);
-        if (!maskPrepared) {
-          throw new Error("Mask could not be prepared for area edit.");
-        }
-        const refMeta = mimeAndBase64FromDataUrl(scaled.ref);
-        const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
-        const maskMeta = scaled.mask ? mimeAndBase64FromDataUrl(scaled.mask) : null;
-        const maskMime = maskMeta?.mimeType ?? maskPrepared.mimeType ?? "image/png";
-
-        const parts = buildMaskEditParts(
-          userPrompt,
-          refMime,
-          maskMime,
-          imagePrepared.base64,
-          maskPrepared.base64,
-        );
-
-        for (let ti = 0; ti < plan.temperatures.length; ti++) {
-          const temp = plan.temperatures[ti]!;
-          try {
-            const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash-image",
-              contents: [{ role: "user", parts }],
-              config: {
-                responseModalities: [Modality.IMAGE],
-                temperature: temp,
-                imageConfig: { aspectRatio },
-              },
-            });
-            return extractInlineImageDataUrl(response);
-          } catch (e) {
-            lastError = e instanceof Error ? e : new Error(String(e));
-            const isLastPlan = pi === plans.length - 1;
-            const isLastTemp = ti === plan.temperatures.length - 1;
-            if (isLastPlan && isLastTemp) throw lastError;
-            console.warn(
-              `[transformImage] area edit retry (maxDim=${plan.maxDim}, temp=${temp}):`,
-              lastError.message.slice(0, 160),
-            );
-            await new Promise((r) => setTimeout(r, 450));
-          }
-        }
-      }
-
-      throw lastError;
-    });
+    return callWithRetry(() =>
+      runMaskedInpaintGeneration(imageBase64, maskBase64, instruction),
+    );
   }
 
   const imagePrepared = await ensureBase64(imageBase64);
@@ -554,3 +661,32 @@ export const transformImage = async (
     throw lastError;
   });
 };
+
+/** Used by areaEdit pipeline — wraps transformImage with mask. */
+export async function generateMaskedInpaintImage(opts: {
+  imageDataUrl: string;
+  maskDataUrl: string;
+  instructionText: string;
+  aspectRatio?: GeminiImageAspectRatio;
+  highQuality?: boolean;
+  seed?: number;
+  temperature?: number;
+}): Promise<string> {
+  void opts.aspectRatio;
+  void opts.highQuality;
+  void opts.seed;
+  void opts.temperature;
+  const instruction =
+    opts.instructionText.includes("LOCAL INPAINTING") ||
+    opts.instructionText.includes("WHITE/LIGHT")
+      ? opts.instructionText
+      : buildAreaEditInstruction(
+          enrichAreaEditPrompt(opts.instructionText),
+          inferAreaEditOperation(opts.instructionText),
+        );
+  return runMaskedInpaintGeneration(
+    opts.imageDataUrl,
+    opts.maskDataUrl,
+    instruction,
+  );
+}
