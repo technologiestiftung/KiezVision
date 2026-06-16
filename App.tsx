@@ -45,14 +45,20 @@ import {
 } from "./services/geminiService";
 import {
   geocodeBerlin,
-  fetchMapillaryImage,
+  fetchMapillaryCandidates,
   reverseGeocodeLocation,
+  type GeocodeResult,
+  type MapillaryCandidate,
 } from "./services/mapillaryService";
+import {
+  ImagerySelectionModal,
+  type ImagerySelectionConfirmPayload,
+} from "./components/ImagerySelectionModal";
 import {
   buildTransformPrompt,
 } from "./services/presetRules";
 import { runAreaEdit } from "./areaEdit";
-import { toDisplayableDataUrl } from "./services/imageUtils";
+import { cropDataUrl, toDisplayableDataUrl } from "./services/imageUtils";
 import {
   isFileSystemAccessSupported,
   getRootHandleSilently,
@@ -98,6 +104,8 @@ const BERLIN_DISTRICTS = [
 ];
 
 const kiezvisionLogoUrl = "/kiezvision_logo.png";
+
+const DEFAULT_IMAGERY_SEARCH_RADIUS_M = 120;
 
 /** 3×3 max dilation on mask alpha — expands matte slightly so generated objects are not hard-clipped at brush edges. */
 function dilateMaskAlpha(
@@ -402,7 +410,20 @@ export default function App() {
       sourcePhotographic: "Photographic",
       sourceSynthetic: "Synthetic",
       defaultLocation: "Berlin Standard View",
-      externalImageryView: "External Imagery View",
+      externalImageryView: "Change imagery source",
+      imageryPickerTitle: "Choose street imagery",
+      imageryPickerSubtitle:
+        "Pick a Mapillary photo near your search and adjust coordinates if needed.",
+      imageryLat: "Latitude",
+      imageryLng: "Longitude",
+      imagerySearchRadius: "Search radius",
+      imageryRefresh: "Refresh photos",
+      imageryDistance: "away",
+      imageryNoCandidates:
+        "No Mapillary photos in this radius. Widen the radius or nudge coordinates.",
+      imageryConfirm: "Use this imagery",
+      imageryCancel: "Cancel",
+      imageryOpenMapillary: "Open in Mapillary",
       before: "BEFORE",
       after: "AFTER",
       beforeAfterComparison: "Before and after comparison",
@@ -505,7 +526,20 @@ export default function App() {
       sourcePhotographic: "Fotografisch",
       sourceSynthetic: "Synthetisch",
       defaultLocation: "Berlin Standardansicht",
-      externalImageryView: "Externe Bildansicht",
+      externalImageryView: "Bildquelle ändern",
+      imageryPickerTitle: "Straßenbild wählen",
+      imageryPickerSubtitle:
+        "Mapillary-Foto in der Nähe wählen und bei Bedarf Koordinaten anpassen.",
+      imageryLat: "Breitengrad",
+      imageryLng: "Längengrad",
+      imagerySearchRadius: "Suchradius",
+      imageryRefresh: "Fotos aktualisieren",
+      imageryDistance: "entfernt",
+      imageryNoCandidates:
+        "Keine Mapillary-Fotos in diesem Radius. Radius vergrößern oder Koordinaten verschieben.",
+      imageryConfirm: "Dieses Bild verwenden",
+      imageryCancel: "Abbrechen",
+      imageryOpenMapillary: "In Mapillary öffnen",
       before: "VORHER",
       after: "NACHHER",
       beforeAfterComparison: "Vorher-Nachher-Vergleich",
@@ -626,6 +660,34 @@ export default function App() {
     link: string;
     capturedAt?: string;
   } | null>(null);
+  const [imageryPickerOpen, setImageryPickerOpen] = useState(false);
+  const [imageryPickerLocation, setImageryPickerLocation] =
+    useState<GeocodeResult | null>(null);
+  const [imageryPickerCandidates, setImageryPickerCandidates] = useState<
+    MapillaryCandidate[]
+  >([]);
+  const [imageryPickerRadiusM, setImageryPickerRadiusM] = useState(
+    DEFAULT_IMAGERY_SEARCH_RADIUS_M,
+  );
+  const [lastImageryGeocode, setLastImageryGeocode] =
+    useState<GeocodeResult | null>(null);
+
+  const imageryPickerStrings = useMemo(
+    () => ({
+      title: t.imageryPickerTitle,
+      subtitle: t.imageryPickerSubtitle,
+      lat: t.imageryLat,
+      lng: t.imageryLng,
+      searchRadius: t.imagerySearchRadius,
+      refresh: t.imageryRefresh,
+      distance: t.imageryDistance,
+      noCandidates: t.imageryNoCandidates,
+      confirm: t.imageryConfirm,
+      cancel: t.imageryCancel,
+      openMapillary: t.imageryOpenMapillary,
+    }),
+    [t],
+  );
 
   // Editor States
   const [editMode, setEditMode] = useState<"comparison" | "mask">("comparison");
@@ -1208,22 +1270,110 @@ export default function App() {
     });
   };
 
+  const openImageryPicker = useCallback(
+    async (geo: GeocodeResult, searchRadiusM = DEFAULT_IMAGERY_SEARCH_RADIUS_M) => {
+      setProcessing({ isProcessing: true, statusMessage: t.fetchingStreet });
+      setError(null);
+      try {
+        const candidates = await fetchMapillaryCandidates(geo.lat, geo.lng, {
+          searchRadiusM,
+          limit: 12,
+        });
+        setImageryPickerLocation(geo);
+        setImageryPickerCandidates(candidates);
+        setImageryPickerRadiusM(searchRadiusM);
+        setImageryPickerOpen(true);
+      } finally {
+        setProcessing({ isProcessing: false });
+      }
+    },
+    [t.fetchingStreet],
+  );
+
+  const handleImageryConfirm = useCallback(
+    async (payload: ImagerySelectionConfirmPayload) => {
+      setProcessing({ isProcessing: true, statusMessage: t.loading });
+      setError(null);
+      try {
+        const imageData = await cropDataUrl(
+          payload.previewDataUrl,
+          payload.crop,
+        );
+        setOriginalImage(imageData);
+        setCurrentImage(imageData);
+        setImageSource(payload.sourceLabel);
+        setFetchedLocation(payload.displayLocation);
+        setMapillaryMetadata(payload.mapillaryMeta);
+        setLastImageryGeocode(payload.location);
+        setSearchQuery(payload.displayLocation);
+        setHistory([
+          {
+            id: Date.now().toString(),
+            dataUrl: imageData,
+            prompt: `${payload.sourceLabel}: ${payload.displayLocation}`,
+            timestamp: Date.now(),
+          },
+        ]);
+        setEditMode("comparison");
+        setMaskBase64(null);
+        setInpaintMountKey((k) => k + 1);
+        setImageryPickerOpen(false);
+        if (normalizedPath !== "/edit") navigate("/edit");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg || t.errorFailedStreetImage);
+      } finally {
+        setProcessing({ isProcessing: false });
+      }
+    },
+    [navigate, normalizedPath, t.errorFailedStreetImage, t.loading],
+  );
+
+  const reopenImageryPicker = useCallback(async () => {
+    let geo = lastImageryGeocode;
+    if (!geo && (fetchedLocation || searchQuery)) {
+      geo = await geocodeBerlin(fetchedLocation || searchQuery, language);
+    }
+    if (!geo) {
+      setError(
+        language === "en"
+          ? "Search for a street first to change imagery."
+          : "Suchen Sie zuerst eine Straße, um die Bildquelle zu ändern.",
+      );
+      return;
+    }
+    await openImageryPicker(geo);
+  }, [
+    lastImageryGeocode,
+    fetchedLocation,
+    searchQuery,
+    language,
+    openImageryPicker,
+  ]);
+
   const handleAutoDetect = async () => {
     setError(null);
     setProcessing({ isProcessing: true, statusMessage: t.detectingLocation });
     try {
       const position = await getCurrentPosition();
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
       const detectedLocation = await reverseGeocodeLocation(
-        position.coords.latitude,
-        position.coords.longitude,
+        lat,
+        lng,
         language,
       );
 
-      if (!detectedLocation?.displayName) {
-        throw new Error("LOCATION_NOT_FOUND");
-      }
+      const geo: GeocodeResult = {
+        lat,
+        lng,
+        displayName:
+          detectedLocation?.displayName ??
+          `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+      };
 
-      setSearchQuery(detectedLocation.displayName);
+      setSearchQuery(geo.displayName);
+      await openImageryPicker(geo);
     } catch (err: any) {
       if (err?.message === "GEOLOCATION_UNSUPPORTED") {
         setError(t.locationUnavailable);
@@ -1247,79 +1397,29 @@ export default function App() {
     });
     setError(null);
     try {
-      let imageData: string | null = null;
-      let source = language === "en" ? "Mapillary Real Image" : "Echtes Bild";
-      let mMeta: { link: string; capturedAt?: string } | null = null;
-      let displayLocation = query;
+      let geo = await geocodeBerlin(query, language);
 
-      // 1. Try Mapillary
-      setProcessing({
-        isProcessing: true,
-        statusMessage:
-          language === "en"
-            ? `Locating ${query}...`
-            : `${query} wird gesucht...`,
-      });
-      const geo = await geocodeBerlin(query);
-
-      if (geo) {
-        displayLocation = geo.displayName;
+      if (!geo && query.match(/\d+/)) {
+        const streetOnly = query.replace(/\d+/, "").trim();
         setProcessing({
           isProcessing: true,
           statusMessage:
             language === "en"
-              ? `Searching Mapillary near ${geo.displayName}...`
-              : `Suche bei Mapillary in der Nähe von ${geo.displayName}...`,
+              ? `Address not found. Trying ${streetOnly}...`
+              : `Adresse nicht gefunden. Versuche ${streetOnly}...`,
         });
-        let mData = await fetchMapillaryImage(geo.lat, geo.lng);
-
-        // Fuzzy Fallback: If specific address fails, try the street name
-        if (!mData && query.match(/\d+/)) {
-          const streetOnly = query.replace(/\d+/, "").trim();
-          setProcessing({
-            isProcessing: true,
-            statusMessage:
-              language === "en"
-                ? `Address specific view not found. Trying ${streetOnly}...`
-                : `Keine genaue Adresse gefunden. Versuche ${streetOnly}...`,
-          });
-          const geoStreet = await geocodeBerlin(streetOnly);
-          if (geoStreet) {
-            mData = await fetchMapillaryImage(geoStreet.lat, geoStreet.lng);
-          }
-        }
-
-        if (mData) {
-          imageData = await toDisplayableDataUrl(mData.url);
-          source = language === "en" ? "Mapillary Real Image" : "Echtes Bild";
-          mMeta = { link: mData.link, capturedAt: mData.capturedAt };
-        }
+        geo = await geocodeBerlin(streetOnly, language);
       }
 
-      // 2. If Mapillary fails, stop (AI Visions removed)
-      if (!imageData) {
+      if (!geo) {
         throw new Error(
           language === "en"
-            ? `No street-level imagery found for "${query}". Try searching for major intersections or a nearby landmark.`
-            : `Keine Straßenbilder für "${query}" gefunden. Versuchen Sie es mit großen Kreuzungen oder einer nahegelegenen Sehenswürdigkeit.`,
+            ? `Could not locate "${query}" in Berlin. Try a major street or intersection.`
+            : `"${query}" konnte in Berlin nicht gefunden werden. Versuchen Sie eine große Straße oder Kreuzung.`,
         );
       }
 
-      setOriginalImage(imageData);
-      setCurrentImage(imageData);
-      setImageSource(source);
-      setFetchedLocation(displayLocation);
-      setMapillaryMetadata(mMeta);
-      setHistory([
-        {
-          id: Date.now().toString(),
-          dataUrl: imageData,
-          prompt: `${source}: ${displayLocation}`,
-          timestamp: Date.now(),
-        },
-      ]);
-      setEditMode("comparison");
-      navigate("/edit");
+      await openImageryPicker(geo);
     } catch (err: any) {
       const isQuotaError =
         err.message?.toLowerCase().includes("429") ||
@@ -1335,8 +1435,6 @@ export default function App() {
       } else if (isPermissionError) {
         setError(t.errorPermissionDenied);
         setHasApiKey(false);
-      } else if (err.message?.includes("Real imagery not found")) {
-        setError(err.message);
       } else {
         setError(err.message || t.errorFailedStreetImage);
       }
@@ -1985,7 +2083,7 @@ export default function App() {
         )}
 
         {view === "library" && (
-          <div className="max-w-7xl mx-auto p-12">
+          <div className="max-w-screen-2xl mx-auto px-6 sm:px-10 lg:px-16 py-12">
             <div className="flex flex-wrap items-end justify-between gap-6 mb-16 border-b-4 border-eb-900 pb-8">
               <div>
                 <div className="mb-4">
@@ -2135,7 +2233,7 @@ export default function App() {
                       </div>
                       <div className="h-0.5 flex-1 bg-eb-900/10" />
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-12">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-8 lg:gap-12">
                       {entries.map((item) => {
                         const thumb =
                           thumbCache[item.id] ?? item.dataUrl ?? null;
@@ -2279,7 +2377,7 @@ export default function App() {
         )}
 
         {view === "image-gallery" && (
-          <div className="max-w-7xl mx-auto p-8 h-[calc(100vh-80px)] overflow-hidden flex flex-col">
+          <div className="max-w-screen-2xl mx-auto p-6 sm:p-8 h-[calc(100vh-80px)] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between mb-10 border-b-4 border-eb-900 pb-6 flex-shrink-0">
               <div>
                 <h2 className="text-5xl md:text-6xl font-black tracking-tighter leading-none">
@@ -2305,7 +2403,7 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-12 gap-4 md:gap-8 flex-1 min-h-0 overflow-hidden">
                 {/* Thumbnail Rail */}
-                <div className="col-span-12 md:col-span-3 min-h-0 overflow-hidden">
+                <div className="col-span-12 md:col-span-4 min-h-0 overflow-hidden">
                   <div className="bg-white border-2 border-eb-900 shadow-[8px_8px_0px_0px_rgba(255,207,214,1)] overflow-hidden h-full flex flex-col min-h-0">
                     <div className="bg-tsb text-eb-50 px-4 py-2 text-xs font-black">
                       {language === "en"
@@ -2318,7 +2416,7 @@ export default function App() {
                         <button
                           key={img.id}
                           onClick={() => setSelectedGalleryId(img.id)}
-                          className={`w-full h-28 sm:h-32 md:h-36 flex-shrink-0 overflow-hidden transition-all ${
+                          className={`w-full h-36 sm:h-40 md:h-48 flex-shrink-0 overflow-hidden transition-all ${
                             selectedGalleryId === img.id
                               ? "border-4 border-coral-500"
                               : "border-2 border-eb-900/20 hover:border-eb-900"
@@ -2337,7 +2435,7 @@ export default function App() {
                 </div>
 
                 {/* Preview + CTA */}
-                <div className="col-span-12 md:col-span-9 min-h-0 overflow-hidden">
+                <div className="col-span-12 md:col-span-8 min-h-0 overflow-hidden">
                   {(() => {
                     const selected =
                       uploadedGallery.find((x) => x.id === selectedGalleryId) ||
@@ -2441,8 +2539,8 @@ export default function App() {
                 </div>
 
                 {imageSource && !processing.isProcessing && (
-                  <div className="absolute bottom-10 left-10 z-30 flex flex-col gap-2">
-                    <div className="flex flex-col gap-0 border-2 border-eb-900 bg-white shadow-[6px_6px_0px_0px_rgba(32,32,27,1)]">
+                  <div className="absolute bottom-10 left-10 z-30 flex flex-col gap-2 pointer-events-none max-w-[min(100%,14rem)]">
+                    <div className="flex flex-col gap-0 border-2 border-eb-900 bg-white shadow-[6px_6px_0px_0px_rgba(32,32,27,1)] pointer-events-none">
                       <div className="bg-tsb text-eb-50 px-3 py-1 text-xs font-black">
                         {t.sourceLabel}:{" "}
                         {imageSource.includes("Mapillary")
@@ -2455,18 +2553,25 @@ export default function App() {
                         </span>
                       </div>
                     </div>
-                    {mapillaryMetadata && (
-                      <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-1.5 pointer-events-auto w-fit">
+                      <button
+                        type="button"
+                        onClick={() => void reopenImageryPicker()}
+                        className="flex items-center gap-2 bg-coral-100 border-2 border-eb-900 px-4 py-2 text-xs font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all text-left"
+                      >
+                        {t.externalImageryView}
+                      </button>
+                      {mapillaryMetadata && (
                         <a
                           href={mapillaryMetadata.link}
                           target="_blank"
                           rel="noreferrer"
-                          className="flex items-center gap-2 bg-coral-100 border-2 border-eb-900 px-4 py-2 text-xs font-black shadow-[4px_4px_0px_0px_rgba(32,32,27,1)] hover:shadow-none transition-all w-fit"
+                          className="text-[10px] font-black underline"
                         >
-                          {t.externalImageryView}
+                          {t.imageryOpenMapillary}
                         </a>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2742,6 +2847,18 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {imageryPickerOpen && imageryPickerLocation && (
+        <ImagerySelectionModal
+          open={imageryPickerOpen}
+          initialLocation={imageryPickerLocation}
+          initialCandidates={imageryPickerCandidates}
+          initialSearchRadiusM={imageryPickerRadiusM}
+          strings={imageryPickerStrings}
+          onClose={() => setImageryPickerOpen(false)}
+          onConfirm={(payload) => void handleImageryConfirm(payload)}
+        />
+      )}
 
       {error && (
         <div

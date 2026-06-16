@@ -1,3 +1,11 @@
+/** Normalised crop rectangle (0–1 relative to image dimensions). */
+export interface NormalizedCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /**
  * Fetches remote images into a data URL so canvas read/export and Gemini inlineData work
  * without CORS taint (Mapillary CDN URLs often block anonymous fetch).
@@ -93,5 +101,28 @@ export async function resizeDataUrlToDimensions(
   if (!ctx) return dataUrl;
   applyHighQualityCanvasScale(ctx);
   ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/png");
+}
+
+/** Extract a sub-region; pass full frame as x:0,y:0,w:1,h:1 to skip cropping. */
+export async function cropDataUrl(
+  dataUrl: string,
+  crop: NormalizedCrop,
+): Promise<string> {
+  if (crop.w >= 0.99 && crop.h >= 0.99 && crop.x <= 0.01 && crop.y <= 0.01) {
+    return dataUrl;
+  }
+  const img = await loadImageElement(dataUrl);
+  const x = Math.round(Math.max(0, crop.x) * img.naturalWidth);
+  const y = Math.round(Math.max(0, crop.y) * img.naturalHeight);
+  const w = Math.max(1, Math.round(crop.w * img.naturalWidth));
+  const h = Math.max(1, Math.round(crop.h * img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+  applyHighQualityCanvasScale(ctx);
+  ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
   return canvas.toDataURL("image/png");
 }
