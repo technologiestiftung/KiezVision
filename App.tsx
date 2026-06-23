@@ -33,7 +33,6 @@ import {
   Trash2,
   FolderOpen,
   Eraser,
-  Lock,
 } from "lucide-react";
 import { BeforeAfterSlider } from "./components/BeforeAfterSlider";
 import { InpaintCanvas } from "./components/InpaintCanvas";
@@ -48,9 +47,7 @@ import {
   fetchMapillaryImage,
   reverseGeocodeLocation,
 } from "./services/mapillaryService";
-import {
-  buildTransformPrompt,
-} from "./services/presetRules";
+import { buildTransformPrompt } from "./services/presetRules";
 import { runAreaEdit } from "./areaEdit";
 import { toDisplayableDataUrl } from "./services/imageUtils";
 import {
@@ -211,85 +208,9 @@ function BackToHomeNavButton({
   );
 }
 
-const SITE_PASSWORD = (process.env.SITE_PASSWORD ?? "").trim();
-
-function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
-  const [input, setInput] = useState("");
-  const [error, setError] = useState(false);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (input === SITE_PASSWORD) {
-      sessionStorage.setItem("kv_auth", "1");
-      onUnlock();
-    } else {
-      setError(true);
-      setTimeout(() => setError(false), 1500);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-eb-50 flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-md">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-white flex items-center justify-center border-4 border-eb-900 shadow-[6px_6px_0px_0px_rgba(255,207,214,1)] mb-6">
-            <Lock className="w-8 h-8 text-eb-900" />
-          </div>
-          <h1 className="text-3xl font-black tracking-tighter text-eb-900">
-            KiezVision
-          </h1>
-          <p
-            className="text-sm font-bold text-eb-900/50 mt-1"
-            id="password-hint"
-          >
-            Enter password to continue
-          </p>
-        </div>
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white border-4 border-eb-900 shadow-[12px_12px_0px_0px_rgba(32,32,27,1)] p-8"
-        >
-          <label htmlFor="site-password" className="sr-only">
-            Password
-          </label>
-          <input
-            id="site-password"
-            type="password"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Password"
-            autoFocus
-            aria-describedby="password-hint"
-            aria-invalid={error || undefined}
-            className={`w-full bg-gray-50 border-2 h-14 px-6 text-lg font-black tracking-tighter focus:bg-white transition-all placeholder:text-eb-900/30 ${
-              error ? "border-red-500 bg-red-50" : "border-eb-900"
-            }`}
-          />
-          {error && (
-            <p className="text-red-600 text-xs font-black mt-2" role="alert">
-              Incorrect password
-            </p>
-          )}
-          <button
-            type="submit"
-            className="w-full mt-4 bg-eb-900 text-eb-50 h-14 border-2 border-eb-900 font-black text-sm shadow-[4px_4px_0px_0px_rgba(254,68,65,0.35)] hover:shadow-none hover:bg-coral-500 transition-all"
-          >
-            Unlock
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    if (!SITE_PASSWORD) return true;
-    return sessionStorage.getItem("kv_auth") === "1";
-  });
 
   const normalizePath = (pathname: string) => {
     // Backwards-compat with the requested (typo) route.
@@ -896,7 +817,11 @@ export default function App() {
 
   /** Remote Mapillary URLs cannot be painted until converted to a data URL (CORS). */
   useEffect(() => {
-    if (editMode !== "mask" || !currentImage || currentImage.startsWith("data:")) {
+    if (
+      editMode !== "mask" ||
+      !currentImage ||
+      currentImage.startsWith("data:")
+    ) {
       return;
     }
     let cancelled = false;
@@ -1568,9 +1493,7 @@ export default function App() {
           finalImageData = areaResult.dataUrl;
         } catch (areaErr: unknown) {
           const msg =
-            areaErr instanceof Error
-              ? areaErr.message
-              : String(areaErr);
+            areaErr instanceof Error ? areaErr.message : String(areaErr);
           if (msg.includes("MASK_GEOMETRY") || msg.includes("does not match")) {
             setError(
               language === "en"
@@ -1649,10 +1572,6 @@ export default function App() {
     }
   }, []);
 
-  if (!isAuthenticated) {
-    return <PasswordGate onUnlock={() => setIsAuthenticated(true)} />;
-  }
-
   return (
     <div className="min-h-screen bg-eb-50 text-eb-900 font-sans selection:bg-eb-900 selection:text-eb-50">
       <a href="#main-content" className="skip-link">
@@ -1703,7 +1622,10 @@ export default function App() {
                 aria-pressed={editMode === "comparison"}
                 className={`flex items-center gap-1.5 px-2.5 sm:px-3 lg:px-6 h-full text-xs font-black transition-all ${editMode === "comparison" ? "bg-coral-100 text-eb-900" : "text-eb-50 hover:bg-white/10"}`}
               >
-                <MousePointer2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <MousePointer2
+                  className="w-4 h-4 shrink-0"
+                  aria-hidden="true"
+                />
                 <span className="hidden lg:inline">{t.compare}</span>
                 <span className="sr-only lg:hidden">{t.compare}</span>
               </button>

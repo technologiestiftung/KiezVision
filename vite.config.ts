@@ -14,8 +14,7 @@ export default defineConfig(({ mode }) => {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.CUSTOM_GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.CUSTOM_GEMINI_API_KEY),
         'process.env.CUSTOM_GEMINI_API_KEY': JSON.stringify(env.CUSTOM_GEMINI_API_KEY),
-        'process.env.MAPILLARY_ACCESS_TOKEN': JSON.stringify(env.MAPILLARY_ACCESS_TOKEN),
-        'process.env.SITE_PASSWORD': JSON.stringify(env.SITE_PASSWORD || '')
+        'process.env.MAPILLARY_ACCESS_TOKEN': JSON.stringify(env.MAPILLARY_ACCESS_TOKEN)
       },
       resolve: {
         alias: {
