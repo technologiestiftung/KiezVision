@@ -212,6 +212,11 @@ function BackToHomeNavButton({
 }
 
 const SITE_PASSWORD = (process.env.SITE_PASSWORD ?? "").trim();
+const SITE_PASSWORD_ENABLED = ["true", "1", "yes"].includes(
+  (process.env.ENABLE_SITE_PASSWORD ?? "").trim().toLowerCase(),
+);
+const isPasswordProtectionActive =
+  SITE_PASSWORD_ENABLED && SITE_PASSWORD.length > 0;
 
 function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
   const [input, setInput] = useState("");
@@ -287,7 +292,7 @@ export default function App() {
   const location = useLocation();
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    if (!SITE_PASSWORD) return true;
+    if (!isPasswordProtectionActive) return true;
     return sessionStorage.getItem("kv_auth") === "1";
   });
 
