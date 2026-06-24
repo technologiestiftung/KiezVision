@@ -44,7 +44,7 @@ export const SPATIAL_AWARENESS = [
 const GLOBAL_CONSTRAINTS = [
   // Keep these general: they apply to *all* full-image transforms.
   "Maintain the original scene structure.",
-  "Do NOT change building architecture, facades, windows, doors, signage, or balconies unless explicitly instructed.",
+  "Do NOT change building architecture, windows, doors, signage, or balconies unless explicitly instructed; adding requested greenery on façades (vines, living walls, planters) is allowed when the user or a nature preset asks for it.",
   "Do NOT add any text, labels, watermarks, or signatures.",
   "If unsure about placement, choose the safest option and keep changes confined to street/ground-level public space.",
   SPATIAL_AWARENESS,
@@ -73,12 +73,13 @@ export const PRESET_ADDONS: Partial<Record<TransformationType, string>> = {
   ].join(" "),
   [TransformationType.ADD_TREES]: [
     PRESET_SCOPE_LOCK,
-    "Add nature only where it fits.",
-    "Align planters and tree pits with the sidewalk plane; tree trunks vertical in world space, canopy volume plausible for the distance to facades and overhead wires.",
-    "Allowed: sidewalks/curb edges (street trees, planter boxes), road surface (green corridor / pocket-park conversions), around street furniture (small planters), and rooftops/terraces when visible.",
-    "Forbidden: building facades, windows, doors, and bare walls.",
-    "Buildings: ONLY add greenery to balconies IF balconies exist, and only as balcony planter boxes or subtle vines contained to the balcony area.",
-    "Fallback: if no balconies/rooftops are visible, keep all greenery on sidewalks/curb edges and street-level areas only.",
+    "Add nature only where it fits the Berlin street scene.",
+    "Align street trees and planters with the sidewalk plane; trunks vertical in world space, canopy volume plausible for the distance to façades and overhead wires.",
+    "Allowed at street level: sidewalks and curb edges (street trees, planter boxes), plazas, green corridors on road surface when appropriate, and small planters near street furniture.",
+    "Allowed on buildings: climbing plants and ivy on masonry, vertical gardens and living walls on blank wall panels, trellises, window-box and sill planters, green terraces and rooftops when visible, and contained vines or planter boxes on existing balconies.",
+    "Façade greening must follow the wall plane and perspective; integrate with existing brick, render, or stone — do not hide, replace, or paste over windows, doors, shopfronts, or signage.",
+    "Forbidden: structural architecture changes, new openings, removing glazing, blocking entrances, or unrealistic full-building jungle cover.",
+    "If the scene offers little façade area, prioritize sidewalks and curb edges; otherwise distribute greenery across street level and plausible façade surfaces.",
   ].join(" "),
   [TransformationType.ADD_WATER]: [
     PRESET_SCOPE_LOCK,

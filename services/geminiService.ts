@@ -426,9 +426,10 @@ CRITICAL: The visible edit MUST appear inside every white pixel of image 2 — n
   ];
 }
 
+/** Image models that support generateContent + IMAGE modality (v1beta). */
 const MASK_AREA_MODELS = [
   "gemini-2.5-flash-image",
-  "gemini-2.0-flash-preview-image-generation",
+  "gemini-3.1-flash-image-preview",
 ];
 
 async function generateMaskedFrame(
@@ -491,10 +492,15 @@ async function generateMaskedFrame(
         );
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
+        const msg = lastError.message;
+        if (msg.includes("NOT_FOUND") || msg.includes("404")) {
+          console.warn(`[transformImage] model unavailable, skipping: ${model}`);
+          break;
+        }
         if (attempt >= maxAttempts) throw lastError;
         console.warn(
           `[transformImage] area edit ${attempt}/${maxAttempts} (${model}, maxDim=${maxDim}, temp=${temp}):`,
-          lastError.message.slice(0, 140),
+          msg.slice(0, 140),
         );
         await new Promise((r) => setTimeout(r, 500));
       }
