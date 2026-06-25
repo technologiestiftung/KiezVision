@@ -253,7 +253,6 @@ Create `.env.local` from [`.env.example`](.env.example):
 | --- | --- | --- |
 | `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes | Google Gemini API key for image generation and location grounding |
 | `MAPILLARY_ACCESS_TOKEN` | Recommended | Mapillary Graph API token for real street imagery |
-| `SITE_PASSWORD` | No | Optional password gate for deployed instances |
 
 If `MAPILLARY_ACCESS_TOKEN` is missing, street search cannot load Mapillary candidates and the app will surface an empty picker or error depending on context.
 
