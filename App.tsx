@@ -34,11 +34,14 @@ import {
   FolderOpen,
   Eraser,
   Lock,
+  Info,
 } from "lucide-react";
 import { BeforeAfterSlider } from "./components/BeforeAfterSlider";
 import { InpaintCanvas } from "./components/InpaintCanvas";
 import { QuickActions } from "./components/QuickActions";
 import { TransformationPanel } from "./components/TransformationPanel";
+import { SiteFooter } from "./components/SiteFooter";
+import { AboutPage } from "./components/AboutPage";
 import {
   transformImage,
   type GeminiImageAspectRatio,
@@ -311,14 +314,16 @@ export default function App() {
   };
 
   const normalizedPath = normalizePath(location.pathname);
-  const view: "home" | "editor" | "library" | "image-gallery" =
+  const view: "home" | "editor" | "library" | "image-gallery" | "about" =
     normalizedPath === "/edit"
       ? "editor"
       : normalizedPath === "/library"
         ? "library"
         : normalizedPath === "/image-gallery"
           ? "image-gallery"
-          : "home";
+          : normalizedPath === "/about"
+            ? "about"
+            : "home";
 
   const [language, setLanguage] = useState<"en" | "de">("en");
 
@@ -326,7 +331,7 @@ export default function App() {
     en: {
       tagline: "Kiezlabor toolkit",
       subtitle:
-        "Envision a greener, car-free future using real Mapillary imagery or AI visions.",
+        "Together, imagine greener streets and livable Kieze across Berlin — from real Mapillary photos to shared visions.",
       reimagine: "Reimagine",
       yourStreet: "Your Street",
       searchPlaceholder: "Search for a street (e.g. Kurfürstendamm)...",
@@ -337,6 +342,18 @@ export default function App() {
       openFolder: "Open Folder",
       capture: "Capture",
       library: "Library",
+      about: "About",
+      aboutTitle: "About KiezVision",
+      aboutIntro:
+        "KiezVision is a shared canvas for imagining how Berlin’s streets and Kieze could look — greener, quieter, and more open to everyday life.",
+      aboutBody:
+        "Start from real street photography anywhere in the city or your own images, then shape a collective picture of what neighborhoods could become: more trees along the sidewalk, fewer cars, places to sit and linger. Compare before and after, refine details together in workshops and participation formats, and save visions to grow a library of possible futures — street by street, Kiez by Kiez.",
+      aboutKiezlaborTitle: "Part of Kiezlabor",
+      aboutKiezlaborBody:
+        "KiezVision is the digital toolkit of Kiezlabor — a mobile participation lab by Technologiestiftung Berlin and CityLAB Berlin that tours Berlin’s districts with tools for urban co-creation.",
+      aboutLinksTitle: "Links",
+      aboutAppLink: "kiez-vision.vercel.app",
+      aboutProjectLink: "Kiezlabor project page",
       backToHome: "Back to Home",
       editorNoImageTitle: "Nothing to edit yet",
       editorNoImageSubtitle:
@@ -440,7 +457,7 @@ export default function App() {
     de: {
       tagline: "Kiezlabor-Toolkit",
       subtitle:
-        "Stellen Sie sich eine grünere, autofreie Zukunft vor, basierend auf echten Mapillary-Bildern oder KI-Visionen.",
+        "Gemeinsam grünere Straßen und lebenswerte Kieze in Berlin entwerfen — von echten Mapillary-Fotos bis zu geteilten Visionen.",
       reimagine: "Ihre Straße",
       yourStreet: "neu denken",
       searchPlaceholder: "Nach einer Straße suchen (z.B. Kurfürstendamm)...",
@@ -451,6 +468,18 @@ export default function App() {
       openFolder: "Ordner öffnen",
       capture: "Aufnehmen",
       library: "Galerie",
+      about: "Über uns",
+      aboutTitle: "Über KiezVision",
+      aboutIntro:
+        "KiezVision ist eine gemeinsame Leinwand, um zu erdenken, wie Berlins Straßen und Kieze aussehen könnten — grüner, ruhiger und offener für das Leben vor der Haustür.",
+      aboutBody:
+        "Ausgehend von echten Straßenfotos aus der ganzen Stadt oder eigenen Bildern entsteht ein gemeinsames Bild dessen, was Kieze werden könnten: mehr Bäume am Gehweg, weniger Autos, Plätze zum Verweilen. Vorher und nachher vergleichen, Details in Workshops und Beteiligungsformaten gemeinsam schärfen und Visionen sammeln — Straße für Straße, Kiez für Kiez — für ein wachsendes Archiv möglicher Zukünfte Berlins.",
+      aboutKiezlaborTitle: "Teil des Kiezlabors",
+      aboutKiezlaborBody:
+        "KiezVision ist das digitale Toolkit des Kiezlabors — eines mobilen Beteiligungslabors der Technologiestiftung Berlin und des CityLAB Berlin, das mit digitalen Werkzeugen für urbane Mitgestaltung durch Berlins Bezirke tourt.",
+      aboutLinksTitle: "Links",
+      aboutAppLink: "kiez-vision.vercel.app",
+      aboutProjectLink: "Kiezlabor-Projektseite",
       backToHome: "Zurück zum Start",
       editorNoImageTitle: "Noch kein Bild zum Bearbeiten",
       editorNoImageSubtitle:
@@ -916,7 +945,7 @@ export default function App() {
       return;
     }
     if (
-      !["/", "/library", "/edit", "/image-gallery"].includes(normalizedPath)
+      !["/", "/library", "/edit", "/image-gallery", "/about"].includes(normalizedPath)
     ) {
       navigate("/", { replace: true });
     }
@@ -1757,7 +1786,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-eb-50 text-eb-900 font-sans selection:bg-eb-900 selection:text-eb-50">
+    <div className="min-h-screen bg-eb-50 text-eb-900 font-sans selection:bg-eb-900 selection:text-eb-50 flex flex-col">
       <a href="#main-content" className="skip-link">
         {language === "en"
           ? "Skip to main content"
@@ -1826,6 +1855,15 @@ export default function App() {
           )}
 
           <div className="flex items-center gap-2 lg:gap-4 h-10 shrink-0">
+            <button
+              onClick={() => requestLeaveEditor("/about")}
+              aria-current={view === "about" ? "page" : undefined}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 lg:px-6 h-full border-2 border-eb-900 text-xs font-black transition-all ${view === "about" ? "bg-eb-900 text-eb-50" : "bg-eb-50 text-eb-900 hover:bg-coral-100 shadow-[4px_4px_0px_0px_rgba(32,32,27,1)]"}`}
+            >
+              <Info className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="hidden lg:inline">{t.about}</span>
+              <span className="sr-only lg:hidden">{t.about}</span>
+            </button>
             <button
               onClick={() => requestLeaveEditor("/library")}
               aria-current={view === "library" ? "page" : undefined}
@@ -1900,7 +1938,7 @@ export default function App() {
         </nav>
       </header>
 
-      <main id="main-content" className="w-full p-0 relative">
+      <main id="main-content" className="w-full p-0 relative flex-1">
         <div aria-live="polite" aria-atomic="true" className="sr-only">
           {processing.isProcessing ? processing.statusMessage : ""}
         </div>
@@ -2085,6 +2123,24 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {view === "about" && (
+          <AboutPage
+            language={language}
+            navigate={navigate}
+            title={t.aboutTitle}
+            backLabel={t.backToHome}
+            intro={t.aboutIntro}
+            body={t.aboutBody}
+            kiezlaborTitle={t.aboutKiezlaborTitle}
+            kiezlaborBody={t.aboutKiezlaborBody}
+            linksTitle={t.aboutLinksTitle}
+            appLabel={t.aboutAppLink}
+            appUrl="https://kiez-vision.vercel.app/"
+            projectLabel={t.aboutProjectLink}
+            projectUrl="https://www.technologiestiftung-berlin.de/projekte/kiezlabor"
+          />
         )}
 
         {view === "library" && (
@@ -2751,6 +2807,8 @@ export default function App() {
           </div>
         )}
       </main>
+
+      <SiteFooter language={language} />
 
       <AnimatePresence>
         {cameraOpen && (
