@@ -62,7 +62,7 @@ export const SiteFooter: React.FC<SiteFooterProps> = ({ language }) => {
 
   return (
     <footer className="border-t-4 border-eb-900 bg-white mt-auto">
-      <div className="max-w-5xl mx-auto px-6 py-8 sm:py-10 flex flex-col items-start">
+      <div className="w-full max-w-full min-w-0 px-3 sm:px-4 lg:px-6 py-8 sm:py-10 flex flex-col items-start">
         <div className="w-full flex flex-col lg:flex-row lg:items-start lg:justify-between gap-10 lg:gap-12">
           <div className="flex flex-col sm:flex-row flex-wrap items-start gap-10 sm:gap-16 lg:gap-20">
             <div className="flex flex-col items-start">
