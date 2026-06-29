@@ -14,6 +14,7 @@ KiezVision is an open source project by the [Technologiestiftung Berlin](https:/
 
 KiezVision is part of the [Kiezlabor](https://www.technologiestiftung-berlin.de/projekte/kiezlabor) — a mobile participation lab by Technologiestiftung Berlin and CityLAB Berlin that tours Berlin’s districts with digital tools for urban co-creation.
 
+- **App:** [kiez-vision.vercel.app](https://kiez-vision.vercel.app/)
 - **Project:** [technologiestiftung-berlin.de/projekte/kiezlabor](https://www.technologiestiftung-berlin.de/projekte/kiezlabor)
 - **Repository:** [github.com/technologiestiftung/KiezVision](https://github.com/technologiestiftung/KiezVision)
 
