@@ -49,7 +49,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({
           {title}
         </h2>
         <p className="text-base sm:text-lg font-bold text-eb-900/80 leading-relaxed mb-4">
-          {intro}
+          <strong>KiezVision</strong> {intro}
         </p>
         <p className="text-sm font-bold text-eb-900/70 leading-relaxed mb-8">
           {body}

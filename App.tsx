@@ -345,9 +345,9 @@ export default function App() {
       about: "About",
       aboutTitle: "About KiezVision",
       aboutIntro:
-        "KiezVision is a shared canvas for imagining how Berlin’s streets and Kieze could look — greener, quieter, and more open to everyday life.",
+        "is a browser-based tool that lets people visually redesign real Berlin street spaces. Starting from Mapillary street photos or your own images, AI (Google Gemini) generates visions of greener, car-reduced, or more livable Kieze — for example with trees, benches, bike racks, or traffic-calmed areas.",
       aboutBody:
-        "Start from real street photography anywhere in the city or your own images, then shape a collective picture of what neighborhoods could become: more trees along the sidewalk, fewer cars, places to sit and linger. Compare before and after, refine details together in workshops and participation formats, and save visions to grow a library of possible futures — street by street, Kiez by Kiez.",
+        "The app is built for planning and participation contexts: quickly making a concrete idea visible, comparing variants (before/after), editing specific areas (Area Edit), and saving results in a local image library. KiezVision is in active development and is being extended iteratively with UX improvements, responsive layout, and more reliable image editing.",
       aboutKiezlaborTitle: "Part of Kiezlabor",
       aboutKiezlaborBody:
         "KiezVision is the digital toolkit of Kiezlabor — a mobile participation lab by Technologiestiftung Berlin and CityLAB Berlin that tours Berlin’s districts with tools for urban co-creation.",
@@ -471,9 +471,9 @@ export default function App() {
       about: "Über uns",
       aboutTitle: "Über KiezVision",
       aboutIntro:
-        "KiezVision ist eine gemeinsame Leinwand, um zu erdenken, wie Berlins Straßen und Kieze aussehen könnten — grüner, ruhiger und offener für das Leben vor der Haustür.",
+        "ist ein browserbasiertes Tool, mit dem Nutzer:innen reale Berliner Straßenräume visuell umgestalten können. Auf Basis von Mapillary-Straßenfotos oder eigenen Bildern lassen sich mit KI (Google Gemini) Visionen für grünere, autofreiere oder lebenswertere Kieze erzeugen — etwa mit Bäumen, Sitzbänken, Fahrradständern oder verkehrsberuhigten Flächen.",
       aboutBody:
-        "Ausgehend von echten Straßenfotos aus der ganzen Stadt oder eigenen Bildern entsteht ein gemeinsames Bild dessen, was Kieze werden könnten: mehr Bäume am Gehweg, weniger Autos, Plätze zum Verweilen. Vorher und nachher vergleichen, Details in Workshops und Beteiligungsformaten gemeinsam schärfen und Visionen sammeln — Straße für Straße, Kiez für Kiez — für ein wachsendes Archiv möglicher Zukünfte Berlins.",
+        "Die Anwendung richtet sich an Planungs- und Beteiligungskontexte: Schnell eine konkrete Vorstellung sichtbar machen, Varianten vergleichen (Vorher/Nachher), einzelne Bereiche gezielt bearbeiten (Area Edit) und Ergebnisse in einer lokalen Bildbibliothek speichern. KiezVision befindet sich in aktiver Entwicklung und wird iterativ um UX, Responsiveness und zuverlässigere Bildbearbeitung erweitert.",
       aboutKiezlaborTitle: "Teil des Kiezlabors",
       aboutKiezlaborBody:
         "KiezVision ist das digitale Toolkit des Kiezlabors — eines mobilen Beteiligungslabors der Technologiestiftung Berlin und des CityLAB Berlin, das mit digitalen Werkzeugen für urbane Mitgestaltung durch Berlins Bezirke tourt.",
