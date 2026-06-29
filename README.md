@@ -1,10 +1,8 @@
-![love badge](https://img.shields.io/badge/Built%20with-%E2%99%A5-red) ![technologiestiftung badge](https://img.shields.io/badge/@-Technologiestiftung%20Berlin-blue) ![citylab badge](https://img.shields.io/badge/@-CityLAB%20Berlin-blue)
+love badge technologiestiftung badge citylab badge
 
-[![All Contributors](https://img.shields.io/badge/all_contributors-2-orange.svg?style=flat-square)](#contributors-)
+[All Contributors](#contributors-)
 
-<p align="center">
-  <img src="./public/kiezvision_logo.png" alt="KiezVision logo" width="120" />
-</p>
+
 
 # KiezVision
 
@@ -24,24 +22,25 @@ To set up KiezVision locally or learn how the application and technology work, s
 
 Additional documentation in this repository:
 
-| Document | Description |
-| --- | --- |
-| [README_DEV.md](./README_DEV.md) | Setup, configuration, architecture, and technical pipelines |
-| [docs/area-edit-backend.md](./docs/area-edit-backend.md) | Area edit (masked inpainting) API reference |
+
+| Document                                                 | Description                                                 |
+| -------------------------------------------------------- | ----------------------------------------------------------- |
+| [README_DEV.md](./README_DEV.md)                         | Setup, configuration, architecture, and technical pipelines |
+| [docs/area-edit-backend.md](./docs/area-edit-backend.md) | Area edit (masked inpainting) API reference                 |
+
 
 ## Contributors ✨
 
 Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
 
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table>
-  <tr>
-    <td align="center"><a href="https://github.com/zainab-tariq"><img src="https://avatars.githubusercontent.com/zainab-tariq?s=100" width="100px;" alt=""/><br /><sub><b>Zainab Tariq</b></sub></a><br /><a href="https://github.com/technologiestiftung/KiezVision/commits?author=zainab-tariq" title="Code">💻</a></td>
-    <td align="center"><a href="https://github.com/Engy-ai"><img src="https://avatars.githubusercontent.com/Engy-ai?s=100" width="100px;" alt=""/><br /><sub><b>Engy El Shenawy</b></sub></a><br /><a href="https://github.com/technologiestiftung/KiezVision/commits?author=Engy-ai" title="Code">💻</a></td>
-  </tr>
-</table>
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
+
+
+
+
+
+|                                                                                                                                         |                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **[Zainab Tariq](https://github.com/zainab-tariq)** [💻](https://github.com/technologiestiftung/KiezVision/commits?author=zainab-tariq) | **[Engy El Shenawy](https://github.com/Engy-ai)** [💻](https://github.com/technologiestiftung/KiezVision/commits?author=Engy-ai) |
+
 
 This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
