@@ -1,9 +1,3 @@
-love badge technologiestiftung badge citylab badge
-
-[All Contributors](#contributors-)
-
-
-
 # KiezVision
 
 ## About KiezVision
