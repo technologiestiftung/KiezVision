@@ -41,10 +41,10 @@ Open **http://localhost:3000/** in a Chromium-based browser (Chrome, Edge, Brave
 
 Create `.env.local` from [`.env.example`](.env.example):
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes | Google Gemini API key for image generation and location grounding |
-| `MAPILLARY_ACCESS_TOKEN` | Recommended | Mapillary Graph API token for real street imagery |
+| Variable                                    | Required    | Description                                                       |
+| ------------------------------------------- | ----------- | ----------------------------------------------------------------- |
+| `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes         | Google Gemini API key for image generation and location grounding |
+| `MAPILLARY_ACCESS_TOKEN`                    | Recommended | Mapillary Graph API token for real street imagery                 |
 
 If `MAPILLARY_ACCESS_TOKEN` is missing, street search cannot load Mapillary candidates and the app will surface an empty picker or error depending on context.
 
@@ -54,10 +54,10 @@ Keys are injected at build time through Vite `define` in [`vite.config.ts`](vite
 
 For architecture, technical pipelines, and how the app works under the hood, see [README_DEV.md](./README_DEV.md).
 
-| Document | Description |
-| --- | --- |
-| [README_DEV.md](./README_DEV.md) | Architecture, app workflow, and technical pipelines |
-| [docs/area-edit-backend.md](./docs/area-edit-backend.md) | Area edit (masked inpainting) API reference |
+| Document                                                 | Description                                         |
+| -------------------------------------------------------- | --------------------------------------------------- |
+| [README_DEV.md](./README_DEV.md)                         | Architecture, app workflow, and technical pipelines |
+| [docs/area-edit-backend.md](./docs/area-edit-backend.md) | Area edit (masked inpainting) API reference         |
 
 ## Contributors ✨
 
