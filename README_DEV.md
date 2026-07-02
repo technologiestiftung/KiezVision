@@ -40,10 +40,10 @@ Open **http://localhost:3000/** in a Chromium-based browser (Chrome, Edge, Brave
 
 Create `.env.local` from [`.env.example`](.env.example):
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes | Google Gemini API key for image generation and location grounding |
-| `MAPILLARY_ACCESS_TOKEN` | Recommended | Mapillary Graph API token for real street imagery |
+| Variable                                    | Required    | Description                                                       |
+| ------------------------------------------- | ----------- | ----------------------------------------------------------------- |
+| `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes         | Google Gemini API key for image generation and location grounding |
+| `MAPILLARY_ACCESS_TOKEN`                    | Recommended | Mapillary Graph API token for real street imagery                 |
 
 If `MAPILLARY_ACCESS_TOKEN` is missing, street search cannot load Mapillary candidates and the app will surface an empty picker or error depending on context.
 
@@ -55,12 +55,12 @@ Keys are injected at build time through Vite `define` in [`vite.config.ts`](vite
 
 KiezVision is a single-page React application with four main views, routed via React Router:
 
-| Route | View | Purpose |
-| --- | --- | --- |
-| `/` | Home | Search for a Berlin location, upload photos, or capture from camera |
-| `/edit` | Editor | Transform images, compare results, and apply area-specific edits |
-| `/library` | Image library | Browse and reopen saved visions |
-| `/image-gallery` | Upload gallery | Review multiple uploaded files before editing |
+| Route            | View           | Purpose                                                             |
+| ---------------- | -------------- | ------------------------------------------------------------------- |
+| `/`              | Home           | Search for a Berlin location, upload photos, or capture from camera |
+| `/edit`          | Editor         | Transform images, compare results, and apply area-specific edits    |
+| `/library`       | Image library  | Browse and reopen saved visions                                     |
+| `/image-gallery` | Upload gallery | Review multiple uploaded files before editing                       |
 
 ### Typical workflow
 
@@ -125,15 +125,15 @@ KiezVision runs entirely in the browser. There is no custom backend server; exte
 
 ### Tech stack
 
-| Layer | Technology |
-| --- | --- |
-| UI | React 19, TypeScript, Tailwind CSS (utility classes) |
-| Routing | React Router 7 |
-| Motion | Motion (Framer Motion successor) |
-| Build | Vite 6 |
-| Image AI | `@google/genai` — Gemini image models with `responseModalities: [IMAGE]` |
-| Street imagery | Mapillary Graph API |
-| Geocoding | OpenStreetMap Nominatim (Berlin-bounded forward geocode) |
+| Layer             | Technology                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------- |
+| UI                | React 19, TypeScript, Tailwind CSS (utility classes)                                                |
+| Routing           | React Router 7                                                                                      |
+| Motion            | Motion (Framer Motion successor)                                                                    |
+| Build             | Vite 6                                                                                              |
+| Image AI          | `@google/genai` — Gemini image models with `responseModalities: [IMAGE]`                            |
+| Street imagery    | Mapillary Graph API                                                                                 |
+| Geocoding         | OpenStreetMap Nominatim (Berlin-bounded forward geocode)                                            |
 | Local persistence | `localStorage` (library metadata), IndexedDB (folder handle), File System Access API (on-disk PNGs) |
 
 ### Image acquisition pipeline
@@ -204,13 +204,13 @@ See [docs/area-edit-backend.md](docs/area-edit-backend.md) for the full API refe
 
 ### Library and persistence
 
-| Storage | Contents |
-| --- | --- |
-| React state | Current image, history stack, editor mode, processing status |
-| `sessionStorage` / in-memory | Editor session (cleared on full page reload unless restored from library) |
-| `localStorage` (`kiezvision_library`) | Library entry metadata (prompt, timestamp, on-disk paths) |
-| IndexedDB (`kiezvision-fs`) | Persisted `FileSystemDirectoryHandle` for the chosen library folder |
-| User folder (Chromium) | Full-resolution PNG + JPEG thumbnail per saved vision |
+| Storage                               | Contents                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| React state                           | Current image, history stack, editor mode, processing status              |
+| `sessionStorage` / in-memory          | Editor session (cleared on full page reload unless restored from library) |
+| `localStorage` (`kiezvision_library`) | Library entry metadata (prompt, timestamp, on-disk paths)                 |
+| IndexedDB (`kiezvision-fs`)           | Persisted `FileSystemDirectoryHandle` for the chosen library folder       |
+| User folder (Chromium)                | Full-resolution PNG + JPEG thumbnail per saved vision                     |
 
 Saving requires a Chromium-based browser with File System Access API support. Without a connected folder, library entries may fall back to inline data URLs.
 
@@ -222,40 +222,56 @@ UI strings are defined inline in `App.tsx` for English and German. Language sele
 
 ## Project structure
 
+Aligned with [BärGPT](https://github.com/technologiestiftung/baergpt) frontend conventions: feature-based `components/`, shared `primitives/`, centralized copy in `content.ts`, and explicit `.ts`/`.tsx` import extensions.
+
 ```
 KiezVision/
-├── App.tsx                      # Application shell, routing, editor orchestration
-├── areaEdit/                    # Masked inpainting domain layer
-│   ├── pipeline/runAreaEdit.ts
-│   ├── providers/geminiAreaEditProvider.ts
-│   ├── composite/compositePatch.ts
-│   └── prompts/                 # Operation-specific prompt builders
-├── components/
-│   ├── InpaintCanvas.tsx        # Brush / eraser mask painting
-│   ├── BeforeAfterSlider.tsx    # Compare mode viewer
-│   ├── ImagerySelectionModal.tsx
-│   ├── TransformationPanel.tsx  # Presets and custom prompt
-│   └── QuickActions.tsx
-├── services/
-│   ├── geminiService.ts         # Gemini image generation and geocoding helpers
-│   ├── mapillaryService.ts      # Mapillary + Nominatim integration
-│   ├── presetRules.ts           # Preset prompt rules and scope locks
-│   ├── libraryStorage.ts        # File System Access + IndexedDB
-│   └── imageUtils.ts            # Data URL helpers, crop, resize
+├── src/
+│   ├── index.tsx                # React entry point
+│   ├── App.tsx                  # Auth gate + AppProvider wrapper
+│   ├── content.ts               # EN/DE UI strings
+│   ├── constants.ts
+│   ├── types.ts
+│   ├── context/
+│   │   └── app-context.tsx      # Shared state (editor, library, imagery, camera)
+│   ├── layouts/
+│   │   └── app-layout.tsx       # Shell: header, <Outlet>, footer, modals
+│   ├── routes/                  # One folder per route (baergpt-style)
+│   │   ├── index.tsx            # <Routes> definition
+│   │   ├── path-utils.ts
+│   │   ├── home/index.tsx
+│   │   ├── edit/index.tsx
+│   │   ├── library/index.tsx
+│   │   ├── image-gallery/index.tsx
+│   │   └── about/index.tsx
+│   ├── hooks/                   # use-editor, use-library, use-focus-trap
+│   ├── components/
+│   │   ├── primitives/
+│   │   ├── header/, footer/, home/, about/, editor/, library/, gallery/, …
+│   ├── areaEdit/
+│   └── services/
+├── public/
 └── docs/
-    └── area-edit-backend.md     # Area edit technical reference
 ```
+
+**Conventions:**
+
+- **kebab-case** file and folder names (`before-after-slider.tsx`)
+- **Named exports** for components (`export const PrimaryButton`)
+- **No barrel `index.ts`** in `components/` — import directly by file path
+- **Feature folders** group related UI; primitives stay presentational
+- **Copy** lives in `content.ts` (`getContent(language)`)
 
 ---
 
 ## Development commands
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Start Vite dev server on port 3000 (`host: 0.0.0.0`) |
-| `npm run build` | Production build to `dist/` |
-| `npm run preview` | Serve the production build locally |
-| `npm run lint` | TypeScript type check (`tsc --noEmit`) |
+| Command           | Description                                          |
+| ----------------- | ---------------------------------------------------- |
+| `npm run dev`     | Start Vite dev server on port 3000 (`host: 0.0.0.0`) |
+| `npm run build`   | Production build to `dist/`                          |
+| `npm run preview` | Serve the production build locally                   |
+| `npm run lint`    | TypeScript type check (`tsc --noEmit`)               |
 
 Active development happens on feature branches and merges into `main` via pull request.
 
@@ -263,12 +279,12 @@ Active development happens on feature branches and merges into `main` via pull r
 
 ## Browser support
 
-| Feature | Requirement |
-| --- | --- |
-| Core editor (search, transform, compare) | Modern browser with ES modules |
-| Area edit (canvas mask) | Canvas 2D support |
-| Save to disk folder | Chromium (Chrome, Edge, Brave, Arc) + File System Access API |
-| Camera capture | HTTPS or `localhost`; `navigator.mediaDevices.getUserMedia` |
+| Feature                                  | Requirement                                                  |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| Core editor (search, transform, compare) | Modern browser with ES modules                               |
+| Area edit (canvas mask)                  | Canvas 2D support                                            |
+| Save to disk folder                      | Chromium (Chrome, Edge, Brave, Arc) + File System Access API |
+| Camera capture                           | HTTPS or `localhost`; `navigator.mediaDevices.getUserMedia`  |
 
 ---
 

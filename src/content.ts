@@ -1,0 +1,263 @@
+export type Language = "en" | "de";
+
+export const Content = {
+	en: {
+		tagline: "Kiezlabor toolkit",
+		subtitle:
+			"Together, imagine greener streets and livable Kieze across Berlin — from real Mapillary photos to shared visions.",
+		reimagine: "Reimagine",
+		yourStreet: "Your Street",
+		searchPlaceholder: "Search for a street (e.g. Kurfürstendamm)...",
+		autoDetect: "Auto Detect",
+		go: "GO",
+		exploreDistricts: "Explore Districts",
+		uploadPhoto: "Upload Photo",
+		openFolder: "Open Folder",
+		capture: "Capture",
+		library: "Library",
+		about: "About",
+		aboutTitle: "About KiezVision",
+		aboutIntro:
+			"is a browser-based tool that lets people visually redesign real Berlin street spaces. Starting from Mapillary street photos or your own images, AI (Google Gemini) generates visions of greener, car-reduced, or more livable Kieze — for example with trees, benches, bike racks, or traffic-calmed areas.",
+		aboutBody:
+			"The app is built for planning and participation contexts: quickly making a concrete idea visible, comparing variants (before/after), editing specific areas (Area Edit), and saving results in a local image library. KiezVision is in active development and is being extended iteratively with UX improvements, responsive layout, and more reliable image editing.",
+		aboutKiezlaborTitle: "Part of Kiezlabor",
+		aboutKiezlaborBody:
+			"KiezVision is the digital toolkit of Kiezlabor — a mobile participation lab by Technologiestiftung Berlin and CityLAB Berlin that tours Berlin’s districts with tools for urban co-creation.",
+		aboutLinksTitle: "Links",
+		aboutAppLink: "kiez-vision.vercel.app",
+		aboutProjectLink: "Kiezlabor project page",
+		backToHome: "Back to Home",
+		editorNoImageTitle: "Nothing to edit yet",
+		editorNoImageSubtitle:
+			"The photo lives only in this browser tab. Reloading the page or opening the editor link directly clears it. Start from home or open a saved vision from the Library.",
+		imageLibrary: "Image Library",
+		startTransformation: "Start Transformation",
+		imageGallery: "Image Gallery",
+		editThisImage: "Edit this image",
+		yourSavedVisions: "Your Saved Visions",
+		libraryEmptyTitle: "No saved visions yet",
+		libraryEmptySubtitle:
+			"Transform a Berlin street in the editor and hit Save to add your first vision here.",
+		libraryEmptyCta: "Start a new vision",
+		dateToday: "Today",
+		dateYesterday: "Yesterday",
+		visionsCount: "visions",
+		visionCountSingular: "vision",
+		libraryFolderConnected: "Library folder connected",
+		libraryFolderDisconnected: "No library folder yet",
+		libraryFolderNeedsPermission: "Library folder needs to be reconnected",
+		reconnectLibraryFolder: "Reconnect Folder",
+		reconnectBannerTitle: "Reconnect your library folder",
+		reconnectBannerSubtitle:
+			"Browsers ask for permission again after a refresh. One click brings your saved visions back.",
+		chooseLibraryFolder: "Choose Library Folder",
+		changeLibraryFolder: "Change Folder",
+		folderUnavailable:
+			"Saved file not found on disk. The folder may have moved or the file was deleted.",
+		browserUnsupportedFolder:
+			"Saving to a folder requires a Chromium browser (Chrome, Edge, Brave, Arc).",
+		openInEditor: "Open in Editor",
+		compare: "Compare",
+		areaEdit: "Area Edit",
+		save: "Save",
+		clearHistory: "Clear History",
+		toolkit: "Transformation Toolkit",
+		size: "Brush Size",
+		presets: "Presets",
+		customCommand: "Custom Command",
+		placeholderEditor:
+			"Describe the transformation (e.g. 'add solar panels', 'planting day')...",
+		placeholderMask:
+			"Describe what to put in the selected area (e.g. 'add a tree', 'park bench')...",
+		loading: "Loading from library...",
+		fetchingStreet: "Fetching your street...",
+		detectingLocation: "Detecting your location...",
+		locationUnavailable: "Current location is not available in this browser.",
+		locationPermissionDenied:
+			"Location permission was denied. Allow location access and try again.",
+		locationNotFound:
+			"Could not identify a nearby street for your current location.",
+		synthesizing: "Synthesizing...",
+		iterations: "Model Iterations",
+		maskSettings: "Mask settings",
+		brush: "Brush",
+		eraser: "Eraser",
+		clearMask: "Clear mask",
+		areaEditTipTitle: "Placement tip",
+		areaEditTipBody:
+			"The soft lavender brush shows where to edit. The merge step adds a small ring beyond your stroke so lamps, awnings, and furniture are not cut off at the edge; distant parts of the photo stay unchanged.",
+		sourceMapillary: "Mapillary Real Image",
+		sourceAI: "AI Generated",
+		realPhoto: "real photo",
+		aiVision: "AI vision",
+		takePhoto: "Take photo",
+		cancelCamera: "Cancel",
+		errorQuotaExceeded:
+			"AI Quota Exceeded. Please wait a moment and try again.",
+		errorPermissionDenied:
+			"Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.",
+		errorFailedStreetImage: "Failed to generate street image.",
+		errorFailedTransform: "Failed to transform image",
+		errorSelectFolder: "Could not select folder.",
+		errorReconnectFolder: "Could not reconnect folder.",
+		sourceLabel: "Source",
+		sourcePhotographic: "Photographic",
+		sourceSynthetic: "Synthetic",
+		defaultLocation: "Berlin Standard View",
+		externalImageryView: "Change imagery source",
+		imageryPickerTitle: "Choose street imagery",
+		imageryPickerSubtitle:
+			"Pick a Mapillary photo near your search and adjust coordinates if needed.",
+		imageryLat: "Latitude",
+		imageryLng: "Longitude",
+		imagerySearchRadius: "Search radius",
+		imageryRefresh: "Refresh photos",
+		imageryDistance: "away",
+		imageryNoCandidates:
+			"No Mapillary photos in this radius. Widen the radius or nudge coordinates.",
+		imageryConfirm: "Use this imagery",
+		imageryCancel: "Cancel",
+		imageryOpenMapillary: "Open in Mapillary",
+		before: "BEFORE",
+		after: "AFTER",
+		beforeAfterComparison: "Before and after comparison",
+		drawingCanvasLabel:
+			"Drawing canvas — use mouse or touch to paint the area you want to transform",
+		drawingCanvasRoleDescription: "drawing canvas",
+		errorFailedUpload: "Failed to process upload.",
+	},
+	de: {
+		tagline: "Kiezlabor-Toolkit",
+		subtitle:
+			"Gemeinsam grünere Straßen und lebenswerte Kieze in Berlin entwerfen — von echten Mapillary-Fotos bis zu geteilten Visionen.",
+		reimagine: "Ihre Straße",
+		yourStreet: "neu denken",
+		searchPlaceholder: "Nach einer Straße suchen (z.B. Kurfürstendamm)...",
+		autoDetect: "Auto-Erkennung",
+		go: "LOS",
+		exploreDistricts: "Bezirke erkunden",
+		uploadPhoto: "Foto hochladen",
+		openFolder: "Ordner öffnen",
+		capture: "Aufnehmen",
+		library: "Galerie",
+		about: "Über uns",
+		aboutTitle: "Über KiezVision",
+		aboutIntro:
+			"ist ein browserbasiertes Tool, mit dem Nutzer:innen reale Berliner Straßenräume visuell umgestalten können. Auf Basis von Mapillary-Straßenfotos oder eigenen Bildern lassen sich mit KI (Google Gemini) Visionen für grünere, autofreiere oder lebenswertere Kieze erzeugen — etwa mit Bäumen, Sitzbänken, Fahrradständern oder verkehrsberuhigten Flächen.",
+		aboutBody:
+			"Die Anwendung richtet sich an Planungs- und Beteiligungskontexte: Schnell eine konkrete Vorstellung sichtbar machen, Varianten vergleichen (Vorher/Nachher), einzelne Bereiche gezielt bearbeiten (Area Edit) und Ergebnisse in einer lokalen Bildbibliothek speichern. KiezVision befindet sich in aktiver Entwicklung und wird iterativ um UX, Responsiveness und zuverlässigere Bildbearbeitung erweitert.",
+		aboutKiezlaborTitle: "Teil des Kiezlabors",
+		aboutKiezlaborBody:
+			"KiezVision ist das digitale Toolkit des Kiezlabors — eines mobilen Beteiligungslabors der Technologiestiftung Berlin und des CityLAB Berlin, das mit digitalen Werkzeugen für urbane Mitgestaltung durch Berlins Bezirke tourt.",
+		aboutLinksTitle: "Links",
+		aboutAppLink: "kiez-vision.vercel.app",
+		aboutProjectLink: "Kiezlabor-Projektseite",
+		backToHome: "Zurück zum Start",
+		editorNoImageTitle: "Noch kein Bild zum Bearbeiten",
+		editorNoImageSubtitle:
+			"Das Foto liegt nur im Speicher dieses Tabs. Nach einem Reload oder direktem Aufruf von /edit ist es weg — starte auf der Startseite oder öffne eine Vision aus der Galerie.",
+		imageLibrary: "Bildgalerie",
+		startTransformation: "Transformation starten",
+		imageGallery: "Bildergalerie",
+		editThisImage: "Dieses Bild bearbeiten",
+		yourSavedVisions: "Ihre gespeicherten Visionen",
+		libraryEmptyTitle: "Noch keine gespeicherten Visionen",
+		libraryEmptySubtitle:
+			"Transformiere eine Berliner Straße im Editor und klicke auf Speichern, um deine erste Vision hier abzulegen.",
+		libraryEmptyCta: "Neue Vision starten",
+		dateToday: "Heute",
+		dateYesterday: "Gestern",
+		visionsCount: "Visionen",
+		visionCountSingular: "Vision",
+		libraryFolderConnected: "Galerie-Ordner verbunden",
+		libraryFolderDisconnected: "Noch kein Galerie-Ordner",
+		libraryFolderNeedsPermission: "Galerie-Ordner muss erneut verbunden werden",
+		reconnectLibraryFolder: "Ordner erneut verbinden",
+		reconnectBannerTitle: "Galerie-Ordner erneut verbinden",
+		reconnectBannerSubtitle:
+			"Browser fragen nach einem Reload erneut nach der Berechtigung. Ein Klick stellt deine gespeicherten Visionen wieder her.",
+		chooseLibraryFolder: "Galerie-Ordner wählen",
+		changeLibraryFolder: "Ordner ändern",
+		folderUnavailable:
+			"Datei auf der Festplatte nicht gefunden. Der Ordner wurde verschoben oder die Datei gelöscht.",
+		browserUnsupportedFolder:
+			"Speichern in einem Ordner erfordert einen Chromium-Browser (Chrome, Edge, Brave, Arc).",
+		openInEditor: "Im Editor öffnen",
+		compare: "Vergleichen",
+		areaEdit: "Bereich bearbeiten",
+		save: "Speichern",
+		fetchingStreet: "Suche deine Straße...",
+		detectingLocation: "Standort wird ermittelt...",
+		locationUnavailable:
+			"Der aktuelle Standort ist in diesem Browser nicht verfügbar.",
+		locationPermissionDenied:
+			"Standortberechtigung wurde abgelehnt. Erlaube den Standortzugriff und versuche es erneut.",
+		locationNotFound:
+			"Es konnte keine nahegelegene Straße für deinen aktuellen Standort gefunden werden.",
+		clearHistory: "Verlauf leeren",
+		toolkit: "Transformations-Toolkit",
+		size: "Pinselgröße",
+		presets: "Vorlagen",
+		customCommand: "Eigener Befehl",
+		placeholderEditor:
+			"Beschreiben Sie die Änderung (z.B. 'Solarzellen hinzufügen', 'Pflanztag')...",
+		placeholderMask:
+			"Beschreiben Sie, was in den Bereich soll (z.B. 'ein Baum', 'Parkbank')...",
+		loading: "Lade aus Galerie...",
+		synthesizing: "Synthese läuft...",
+		iterations: "Modell-Iterationen",
+		maskSettings: "Masken-Einstellungen",
+		brush: "Pinsel",
+		eraser: "Radierer",
+		clearMask: "Maske leeren",
+		areaEditTipTitle: "Platzierung",
+		areaEditTipBody:
+			"Der helle Pinsel zeigt den Bearbeitungsort. Beim Zusammenfügen wird die Maske leicht über den Strich erweitert, damit Masten, Markisen und Möbel nicht am Rand abgeschnitten werden; der übrige Bildbereich bleibt unverändert.",
+		sourceMapillary: "Echtes Bild",
+		sourceAI: "KI-Generiert",
+		realPhoto: "Echtes Foto",
+		aiVision: "KI-Vision",
+		takePhoto: "Foto aufnehmen",
+		cancelCamera: "Abbrechen",
+		errorQuotaExceeded:
+			"KI-Kontingent erschöpft. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
+		errorPermissionDenied:
+			"Zugriff verweigert. Diese Funktion erfordert einen kostenpflichtigen API-Schlüssel. Bitte klicken Sie auf das Schlüsselsymbol in der Kopfzeile, um einen Schlüssel auszuwählen.",
+		errorFailedStreetImage: "Straßenbild konnte nicht generiert werden.",
+		errorFailedTransform: "Bild konnte nicht transformiert werden.",
+		errorSelectFolder: "Ordner konnte nicht ausgewählt werden.",
+		errorReconnectFolder: "Ordner konnte nicht erneut verbunden werden.",
+		sourceLabel: "Quelle",
+		sourcePhotographic: "Fotografisch",
+		sourceSynthetic: "Synthetisch",
+		defaultLocation: "Berlin Standardansicht",
+		externalImageryView: "Bildquelle ändern",
+		imageryPickerTitle: "Straßenbild wählen",
+		imageryPickerSubtitle:
+			"Mapillary-Foto in der Nähe wählen und bei Bedarf Koordinaten anpassen.",
+		imageryLat: "Breitengrad",
+		imageryLng: "Längengrad",
+		imagerySearchRadius: "Suchradius",
+		imageryRefresh: "Fotos aktualisieren",
+		imageryDistance: "entfernt",
+		imageryNoCandidates:
+			"Keine Mapillary-Fotos in diesem Radius. Radius vergrößern oder Koordinaten verschieben.",
+		imageryConfirm: "Dieses Bild verwenden",
+		imageryCancel: "Abbrechen",
+		imageryOpenMapillary: "In Mapillary öffnen",
+		before: "VORHER",
+		after: "NACHHER",
+		beforeAfterComparison: "Vorher-Nachher-Vergleich",
+		drawingCanvasLabel:
+			"Zeichenfläche — verwenden Sie Maus oder Touch, um den zu transformierenden Bereich zu markieren",
+		drawingCanvasRoleDescription: "Zeichenfläche",
+		errorFailedUpload: "Upload konnte nicht verarbeitet werden.",
+	},
+} as const;
+
+export type ContentStrings = (typeof Content)[Language];
+
+export function getContent(language: Language): ContentStrings {
+	return Content[language];
+}
