@@ -15,20 +15,15 @@ export function haversineDistanceM(
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Approximate degree delta for a bbox radius at a given latitude. */
-export function metresToDegreeDelta(metres: number, atLat: number): number {
-  const latRad = (atLat * Math.PI) / 180;
-  const metresPerDegreeLat = 111320;
-  const metresPerDegreeLng = metresPerDegreeLat * Math.cos(latRad);
-  return metres / Math.min(metresPerDegreeLat, metresPerDegreeLng);
-}
-
-/** Mapillary bbox searches must stay under ~0.01 square degrees (~1 km side). */
-export const MAPILLARY_MAX_BBOX_HALF_SPAN_DEG = 0.0045;
-
-export function bboxHalfSpanForRadiusM(radiusM: number, atLat: number): number {
-  return Math.min(
-    metresToDegreeDelta(radiusM, atLat),
-    MAPILLARY_MAX_BBOX_HALF_SPAN_DEG,
-  );
+/** Approximate offset in metres (north = +y, east = +x). */
+export function offsetPointM(
+  lat: number,
+  lng: number,
+  metresNorth: number,
+  metresEast: number,
+): { lat: number; lng: number } {
+  const latRad = (lat * Math.PI) / 180;
+  const dLat = metresNorth / 111320;
+  const dLng = metresEast / (111320 * Math.cos(latRad));
+  return { lat: lat + dLat, lng: lng + dLng };
 }
