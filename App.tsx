@@ -74,6 +74,10 @@ import {
   getLibraryFolderStatus,
   type LibraryFolderStatus,
 } from "./services/libraryStorage";
+import {
+  isBerlinDistrict,
+  BERLIN_DISTRICT_SEARCH_RADIUS_M,
+} from "./services/berlinDistricts";
 import { GeneratedImage, LibraryEntry, ProcessingState } from "./types";
 
 declare global {
@@ -425,6 +429,10 @@ export default function App() {
       errorPermissionDenied:
         "Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.",
       errorFailedStreetImage: "Failed to generate street image.",
+      errorMapillaryMissing:
+        "Mapillary access token is missing. Add MAPILLARY_ACCESS_TOKEN to your environment to load street photos.",
+      errorNoMapillaryNearby:
+        "No Mapillary street photos found near this location. Try a major street, widen the search radius in the picker, or upload your own photo.",
       errorFailedTransform: "Failed to transform image",
       errorSelectFolder: "Could not select folder.",
       errorReconnectFolder: "Could not reconnect folder.",
@@ -553,6 +561,10 @@ export default function App() {
       errorPermissionDenied:
         "Zugriff verweigert. Diese Funktion erfordert einen kostenpflichtigen API-Schlüssel. Bitte klicken Sie auf das Schlüsselsymbol in der Kopfzeile, um einen Schlüssel auszuwählen.",
       errorFailedStreetImage: "Straßenbild konnte nicht generiert werden.",
+      errorMapillaryMissing:
+        "Mapillary-Zugangstoken fehlt. MAPILLARY_ACCESS_TOKEN in der Umgebung setzen, um Straßenfotos zu laden.",
+      errorNoMapillaryNearby:
+        "Keine Mapillary-Straßenfotos in der Nähe gefunden. Versuchen Sie eine große Straße, erweitern Sie den Suchradius im Dialog oder laden Sie ein eigenes Foto hoch.",
       errorFailedTransform: "Bild konnte nicht transformiert werden.",
       errorSelectFolder: "Ordner konnte nicht ausgewählt werden.",
       errorReconnectFolder: "Ordner konnte nicht erneut verbunden werden.",
@@ -1313,15 +1325,31 @@ export default function App() {
           searchRadiusM,
           limit: 12,
         });
+        if (candidates.length === 0) {
+          setError(t.errorNoMapillaryNearby);
+          return;
+        }
         setImageryPickerLocation(geo);
         setImageryPickerCandidates(candidates);
         setImageryPickerRadiusM(searchRadiusM);
         setImageryPickerOpen(true);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/MAPILLARY_ACCESS_TOKEN/i.test(msg)) {
+          setError(t.errorMapillaryMissing);
+        } else {
+          setError(msg || t.errorFailedStreetImage);
+        }
       } finally {
         setProcessing({ isProcessing: false });
       }
     },
-    [t.fetchingStreet],
+    [
+      t.fetchingStreet,
+      t.errorFailedStreetImage,
+      t.errorMapillaryMissing,
+      t.errorNoMapillaryNearby,
+    ],
   );
 
   const handleImageryConfirm = useCallback(
@@ -1453,7 +1481,12 @@ export default function App() {
         );
       }
 
-      await openImageryPicker(geo);
+      await openImageryPicker(
+        geo,
+        isBerlinDistrict(query)
+          ? BERLIN_DISTRICT_SEARCH_RADIUS_M
+          : DEFAULT_IMAGERY_SEARCH_RADIUS_M,
+      );
     } catch (err: any) {
       const isQuotaError =
         err.message?.toLowerCase().includes("429") ||

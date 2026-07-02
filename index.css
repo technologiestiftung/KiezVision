@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Host Grotesk";
+  src: url("/fonts/host-grotesk/HostGrotesk-VariableFont_wght.ttf")
+    format("truetype");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Host Grotesk";
+  src: url("/fonts/host-grotesk/HostGrotesk-Italic-VariableFont_wght.ttf")
+    format("truetype");
+  font-weight: 300 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@layer base {
+  body {
+    @apply font-sans bg-eb-50 text-eb-900 m-0;
+  }
+
+  .font-mono {
+    font-family: "Host Grotesk", ui-monospace, monospace;
+  }
+}
+
+/* Custom Brutalist scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #fafaf2;
+  border-left: 2px solid #20201b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #20201b;
+  border: 2px solid #fafaf2;
+}
+
+@keyframes pixelate-in {
+  0% {
+    filter: blur(20px);
+    opacity: 0;
+    transform: scale(1.1);
+  }
+  50% {
+    filter: blur(10px);
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    filter: blur(0px);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-pixel-reveal {
+  animation: pixelate-in 2s ease-out forwards;
+}
+
+.pixel-grid-layer {
+  background-image:
+    linear-gradient(to right, rgba(32, 32, 27, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(32, 32, 27, 0.12) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+
+/* Accessibility: screen-reader-only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Skip-to-content link */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 9999;
+  padding: 0.75rem 1.5rem;
+  background: #20201b;
+  color: #fafaf2;
+  font-weight: 900;
+  font-size: 0.875rem;
+  border: 2px solid #fe4441;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+}
+
+/* Accessible focus ring for interactive elements */
+*:focus-visible {
+  outline: 3px solid #fe4441;
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #1e3791;
+  outline-offset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

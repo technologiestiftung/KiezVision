@@ -22,3 +22,13 @@ export function metresToDegreeDelta(metres: number, atLat: number): number {
   const metresPerDegreeLng = metresPerDegreeLat * Math.cos(latRad);
   return metres / Math.min(metresPerDegreeLat, metresPerDegreeLng);
 }
+
+/** Mapillary bbox searches must stay under ~0.01 square degrees (~1 km side). */
+export const MAPILLARY_MAX_BBOX_HALF_SPAN_DEG = 0.0045;
+
+export function bboxHalfSpanForRadiusM(radiusM: number, atLat: number): number {
+  return Math.min(
+    metresToDegreeDelta(radiusM, atLat),
+    MAPILLARY_MAX_BBOX_HALF_SPAN_DEG,
+  );
+}

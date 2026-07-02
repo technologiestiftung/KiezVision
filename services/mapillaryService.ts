@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { haversineDistanceM, metresToDegreeDelta } from "./geoUtils";
+import { haversineDistanceM, bboxHalfSpanForRadiusM } from "./geoUtils";
+import { geocodeBerlinDistrict } from "./berlinDistricts";
 
 const MAPILLARY_TOKEN = process.env.MAPILLARY_ACCESS_TOKEN;
 
@@ -116,6 +117,9 @@ export const resolveGeocode = async (
   query: string,
   language: "en" | "de" = "en",
 ): Promise<GeocodeResult | null> => {
+  const district = geocodeBerlinDistrict(query);
+  if (district) return district;
+
   const nom = await forwardGeocodeBerlin(query, language);
   if (nom) return nom;
   return geocodeBerlinWithGemini(query);
@@ -190,7 +194,7 @@ function mapApiImageToCandidate(
   targetLng: number,
 ): MapillaryCandidate | null {
   const id = String(img.id ?? "");
-  const url = String(img.thumb_2048_url ?? "");
+  const url = String(img.thumb_2048_url ?? img.thumb_1024_url ?? "");
   if (!id || !url) return null;
 
   const geom = pointFromGeometry(img.geometry ?? img.computed_geometry);
@@ -215,6 +219,36 @@ function mapApiImageToCandidate(
   };
 }
 
+const MAPILLARY_FETCH_TIMEOUT_MS = 12_000;
+
+async function fetchMapillaryJson(url: string): Promise<Record<string, unknown>> {
+  if (!MAPILLARY_TOKEN) {
+    throw new Error("MAPILLARY_ACCESS_TOKEN missing");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MAPILLARY_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Authorization: `OAuth ${MAPILLARY_TOKEN}` },
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+    if (!response.ok) {
+      const err = data.error as { message?: string } | undefined;
+      throw new Error(err?.message ?? `Mapillary HTTP ${response.status}`);
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Mapillary request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchMapillaryCandidates(
   targetLat: number,
   targetLng: number,
@@ -224,43 +258,47 @@ export async function fetchMapillaryCandidates(
   },
 ): Promise<MapillaryCandidate[]> {
   if (!MAPILLARY_TOKEN) {
-    console.warn("Mapillary token missing");
-    return [];
+    throw new Error("MAPILLARY_ACCESS_TOKEN missing");
   }
 
   const limit = options?.limit ?? 12;
-  const radiiM = [
-    options?.searchRadiusM ?? 120,
-    250,
-    500,
-    900,
-    1500,
-  ];
+  const firstRadius = options?.searchRadiusM ?? 120;
+  const radiiM = Array.from(new Set([firstRadius, 250, 320])).sort(
+    (a, b) => a - b,
+  );
 
   const seen = new Set<string>();
   const all: MapillaryCandidate[] = [];
 
-  for (const radiusM of radiiM) {
-    const delta = metresToDegreeDelta(radiusM, targetLat);
+  const fetchAtRadius = async (radiusM: number): Promise<MapillaryCandidate[]> => {
+    const delta = bboxHalfSpanForRadiusM(radiusM, targetLat);
     const bbox = `${targetLng - delta},${targetLat - delta},${targetLng + delta},${targetLat + delta}`;
-    try {
-      const fields =
-        "id,thumb_2048_url,captured_at,compass_angle,is_pano,geometry";
-      const searchUrl = `https://graph.mapillary.com/images?access_token=${MAPILLARY_TOKEN}&fields=${fields}&bbox=${bbox}&is_pano=false&limit=${Math.min(limit * 2, 25)}`;
+    const fields = "id,thumb_1024_url,captured_at,compass_angle,geometry";
+    const searchUrl = `https://graph.mapillary.com/images?fields=${fields}&bbox=${bbox}&is_pano=false&limit=${Math.min(limit, 20)}`;
+    const data = await fetchMapillaryJson(searchUrl);
+    const apiError = data.error as { message?: string } | undefined;
+    if (apiError?.message) {
+      console.warn(`Mapillary API (${radiusM}m):`, apiError.message);
+      return [];
+    }
+    const batch: MapillaryCandidate[] = [];
+    for (const img of (data.data as Record<string, unknown>[] | undefined) ?? []) {
+      const c = mapApiImageToCandidate(img, targetLat, targetLng);
+      if (c) batch.push(c);
+    }
+    return batch;
+  };
 
-      const response = await fetch(searchUrl);
-      const data = await response.json();
-
-      for (const img of data.data ?? []) {
-        const c = mapApiImageToCandidate(img, targetLat, targetLng);
-        if (!c || seen.has(c.id)) continue;
-        seen.add(c.id);
-        all.push(c);
-      }
-
-      if (all.length >= limit) break;
-    } catch (error) {
-      console.error(`Mapillary fetch failed at ${radiusM}m:`, error);
+  const results = await Promise.allSettled(radiiM.map((r) => fetchAtRadius(r)));
+  for (const result of results) {
+    if (result.status !== "fulfilled") {
+      console.error("Mapillary fetch failed:", result.reason);
+      continue;
+    }
+    for (const c of result.value) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      all.push(c);
     }
   }
 
