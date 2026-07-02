@@ -28,9 +28,9 @@ export const BERLIN_DISTRICT_GEOCODES: Record<string, BerlinDistrictGeocode> = {
 		displayName: "Schöneberg, Berlin",
 	},
 	Neukölln: {
-		lat: 52.4811497,
-		lng: 13.4353501,
-		displayName: "Neukölln, Berlin",
+		lat: 52.4735,
+		lng: 13.4512,
+		displayName: "Sonnenallee, Neukölln",
 	},
 	Pankow: { lat: 52.5979174, lng: 13.435316, displayName: "Pankow, Berlin" },
 	Charlottenburg: {
@@ -60,10 +60,14 @@ export const BERLIN_DISTRICT_GEOCODES: Record<string, BerlinDistrictGeocode> = {
 		lng: 13.5754153,
 		displayName: "Köpenick, Berlin",
 	},
-	Marzahn: { lat: 52.5429481, lng: 13.563142, displayName: "Marzahn, Berlin" },
+	Marzahn: {
+		lat: 52.544,
+		lng: 13.545,
+		displayName: "Marzahn, Berlin",
+	},
 	Hellersdorf: {
-		lat: 52.5366956,
-		lng: 13.6048728,
+		lat: 52.536,
+		lng: 13.608,
 		displayName: "Hellersdorf, Berlin",
 	},
 	Lichtenberg: {
@@ -72,21 +76,34 @@ export const BERLIN_DISTRICT_GEOCODES: Record<string, BerlinDistrictGeocode> = {
 		displayName: "Lichtenberg, Berlin",
 	},
 	Reinickendorf: {
-		lat: 52.6047631,
-		lng: 13.2952872,
+		lat: 52.608,
+		lng: 13.315,
 		displayName: "Reinickendorf, Berlin",
 	},
 };
 
+const DISTRICT_ALIASES: Record<string, keyof typeof BERLIN_DISTRICT_GEOCODES> = {
+	Neukolln: "Neukölln",
+	Kopenick: "Köpenick",
+	Koepenick: "Köpenick",
+	Schoeneberg: "Schöneberg",
+};
+
+function resolveDistrictKey(query: string): string {
+	const trimmed = query.trim();
+	return DISTRICT_ALIASES[trimmed] ?? trimmed;
+}
+
 export function geocodeBerlinDistrict(
 	query: string,
 ): BerlinDistrictGeocode | null {
-	const key = query.trim();
+	const key = resolveDistrictKey(query);
 	return BERLIN_DISTRICT_GEOCODES[key] ?? null;
 }
 
 export function isBerlinDistrict(query: string): boolean {
-	return query.trim() in BERLIN_DISTRICT_GEOCODES;
+	const key = resolveDistrictKey(query);
+	return key in BERLIN_DISTRICT_GEOCODES;
 }
 
 export const BERLIN_DISTRICT_SEARCH_RADIUS_M = 320;
