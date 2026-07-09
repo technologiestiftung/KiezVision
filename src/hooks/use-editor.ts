@@ -11,6 +11,7 @@ import type { ContentStrings } from "../content.ts";
 import type { Language } from "../content.ts";
 import {
 	transformImage,
+	isGeminiQuotaError,
 	type GeminiImageAspectRatio,
 } from "../services/geminiService.ts";
 import { buildTransformPrompt } from "../services/presetRules.ts";
@@ -37,12 +38,7 @@ export interface UseEditorOptions {
 }
 
 function isQuotaError(err: unknown): boolean {
-	const message = err instanceof Error ? err.message : String(err);
-	return (
-		message.toLowerCase().includes("429") ||
-		message.toLowerCase().includes("quota") ||
-		JSON.stringify(err).includes("429")
-	);
+	return isGeminiQuotaError(err);
 }
 
 function isPermissionError(err: unknown): boolean {

@@ -18,6 +18,34 @@ import {
 import { getGeminiApiKey } from "../lib/env.ts";
 import { loadImageElement, resizeDataUrlToDimensions } from "./imageUtils";
 
+const TEXT_MODEL = "gemini-2.0-flash";
+const IMAGE_MODEL = "gemini-2.5-flash-image";
+const IMAGE_MODEL_HQ = "gemini-3.1-flash-image-preview";
+
+export function isGeminiQuotaError(error: unknown): boolean {
+	if (!error || typeof error !== "object") {
+		const message = error instanceof Error ? error.message : String(error);
+		return (
+			/\b429\b/.test(message) ||
+			/resource_exhausted/i.test(message) ||
+			/quota exceeded/i.test(message) ||
+			/rate limit/i.test(message)
+		);
+	}
+
+	const e = error as { status?: string; message?: string; code?: number };
+	if (e.status === "RESOURCE_EXHAUSTED" || e.code === 429) return true;
+
+	const message =
+		e.message ?? (error instanceof Error ? error.message : String(error));
+	return (
+		/\b429\b/.test(message) ||
+		/resource_exhausted/i.test(message) ||
+		/quota exceeded/i.test(message) ||
+		/rate limit/i.test(message)
+	);
+}
+
 /** Values supported by Gemini image `imageConfig.aspectRatio` (see @google/genai ImageConfig). */
 export type GeminiImageAspectRatio =
 	"1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "9:16" | "16:9" | "21:9";
@@ -59,18 +87,7 @@ const callWithRetry = async <T>(
 			return await fn();
 		} catch (error: unknown) {
 			lastError = error;
-			const message = error instanceof Error ? error.message : String(error);
-			const status =
-				typeof error === "object" &&
-				error !== null &&
-				"status" in error &&
-				typeof error.status === "string"
-					? error.status
-					: "";
-			const isQuotaError =
-				message.includes("429") ||
-				status === "RESOURCE_EXHAUSTED" ||
-				JSON.stringify(error).includes("429");
+			const isQuotaError = isGeminiQuotaError(error);
 
 			if (isQuotaError && i < maxRetries - 1) {
 				const delay = Math.pow(2, i) * 2000 + Math.random() * 1000;
@@ -310,7 +327,7 @@ export const getGroundedPrompt = async (
 	return callWithRetry(async () => {
 		const ai = getAiClient();
 		const response = await ai.models.generateContent({
-			model: "gemini-3-flash-preview",
+			model: TEXT_MODEL,
 			contents: {
 				parts: [
 					{
@@ -349,9 +366,7 @@ export const generateImage = async (
 
 	return callWithRetry(async () => {
 		const ai = getAiClient();
-		const model = highQuality
-			? "gemini-3.1-flash-image-preview"
-			: "gemini-2.5-flash-image";
+		const model = highQuality ? IMAGE_MODEL_HQ : IMAGE_MODEL;
 
 		const config: Record<string, unknown> = {
 			responseModalities: [Modality.IMAGE],
@@ -417,10 +432,11 @@ CRITICAL: The visible edit MUST appear inside every white pixel of image 2 — n
 }
 
 /** Image models that support generateContent + IMAGE modality (v1beta). */
-const MASK_AREA_MODELS = [
-	"gemini-2.5-flash-image",
-	"gemini-3.1-flash-image-preview",
-];
+function maskAreaModels(highQuality: boolean): string[] {
+	return highQuality
+		? [IMAGE_MODEL, IMAGE_MODEL_HQ]
+		: [IMAGE_MODEL];
+}
 
 async function generateMaskedFrame(options: {
 	ai: GoogleGenAI;
@@ -429,9 +445,17 @@ async function generateMaskedFrame(options: {
 	instruction: string;
 	maxDim: number;
 	temperatures: number[];
+	highQuality?: boolean;
 }): Promise<string> {
-	const { ai, imageBase64, maskBase64, instruction, maxDim, temperatures } =
-		options;
+	const {
+		ai,
+		imageBase64,
+		maskBase64,
+		instruction,
+		maxDim,
+		temperatures,
+		highQuality = false,
+	} = options;
 	const scaled = await scaleRefAndMaskForImageModel(
 		imageBase64,
 		maskBase64,
@@ -461,10 +485,10 @@ async function generateMaskedFrame(options: {
 
 	let lastError = new Error("Area transform failed");
 	let attempt = 0;
-	const maxAttempts =
-		MASK_AREA_MODELS.length * Math.max(temperatures.length, 1);
+	const models = maskAreaModels(highQuality);
+	const maxAttempts = models.length * Math.max(temperatures.length, 1);
 
-	for (const model of MASK_AREA_MODELS) {
+	for (const model of models) {
 		for (const temp of temperatures) {
 			attempt++;
 			try {
@@ -510,6 +534,7 @@ async function runMaskedInpaintGeneration(
 	imageBase64: string,
 	maskBase64: string,
 	instruction: string,
+	highQuality = false,
 ): Promise<string> {
 	const ai = getAiClient();
 	const fullRef = await loadImageElement(imageBase64);
@@ -523,10 +548,12 @@ async function runMaskedInpaintGeneration(
 	});
 	const useCrop = bbox !== null && bbox.areaFraction < 0.82;
 
-	const plans: { maxDim: number; temperatures: number[] }[] = [
-		{ maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API, temperatures: [0.35, 0.5] },
-		{ maxDim: 768, temperatures: [0.4, 0.55] },
-	];
+	const plans: { maxDim: number; temperatures: number[] }[] = highQuality
+		? [
+				{ maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API, temperatures: [0.35, 0.5] },
+				{ maxDim: 768, temperatures: [0.4, 0.55] },
+			]
+		: [{ maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API, temperatures: [0.4] }];
 
 	let lastError = new Error("Area transform failed");
 
@@ -545,6 +572,7 @@ Tight crop around the edit zone. Keep the new content anchored to the same groun
 					instruction: cropInstruction,
 					maxDim: plan.maxDim,
 					temperatures: plan.temperatures,
+					highQuality,
 				});
 				const cropW = bbox.x1 - bbox.x0 + 1;
 				const cropH = bbox.y1 - bbox.y0 + 1;
@@ -559,6 +587,7 @@ Tight crop around the edit zone. Keep the new content anchored to the same groun
 				instruction,
 				maxDim: plan.maxDim,
 				temperatures: plan.temperatures,
+				highQuality,
 			});
 			return resizeDataUrlToDimensions(fullOut, fw, fh);
 		} catch (e) {
@@ -604,7 +633,7 @@ export async function transformImage(
 		imageBase64,
 		prompt,
 		maskBase64,
-		highQuality = true,
+		highQuality = false,
 		aspectRatio = "16:9",
 	} = options;
 	const userPrompt = prompt.replace(/"""+/g, '"').trim();
@@ -613,7 +642,12 @@ export async function transformImage(
 		const instruction = buildMaskInstructionFromPrompt(userPrompt);
 
 		return callWithRetry(() =>
-			runMaskedInpaintGeneration(imageBase64, maskBase64, instruction),
+			runMaskedInpaintGeneration(
+				imageBase64,
+				maskBase64,
+				instruction,
+				highQuality,
+			),
 		);
 	}
 
@@ -649,11 +683,11 @@ export async function transformImage(
 		type ImageAttempt = { model: string; imageSize?: "1K" };
 		const attempts: ImageAttempt[] = highQuality
 			? [
-					{ model: "gemini-3.1-flash-image-preview", imageSize: "1K" },
-					{ model: "gemini-3.1-flash-image-preview" },
-					{ model: "gemini-2.5-flash-image" },
+					{ model: IMAGE_MODEL_HQ, imageSize: "1K" },
+					{ model: IMAGE_MODEL_HQ },
+					{ model: IMAGE_MODEL },
 				]
-			: [{ model: "gemini-2.5-flash-image" }];
+			: [{ model: IMAGE_MODEL }];
 
 		let lastError = new Error("Transform failed");
 
@@ -702,8 +736,6 @@ export async function generateMaskedInpaintImage(opts: {
 	seed?: number;
 	temperature?: number;
 }): Promise<string> {
-	void opts.aspectRatio;
-	void opts.highQuality;
 	void opts.seed;
 	void opts.temperature;
 	const instruction = buildMaskInstructionFromPrompt(opts.instructionText);
@@ -711,5 +743,6 @@ export async function generateMaskedInpaintImage(opts: {
 		opts.imageDataUrl,
 		opts.maskDataUrl,
 		instruction,
+		opts.highQuality ?? false,
 	);
 }

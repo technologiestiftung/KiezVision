@@ -94,7 +94,7 @@ export const Content = {
 		takePhoto: "Take photo",
 		cancelCamera: "Cancel",
 		errorQuotaExceeded:
-			"AI Quota Exceeded. Please wait a moment and try again.",
+			"AI quota exceeded for this API key. Wait a few minutes, or check GEMINI_API_KEY / billing in Google AI Studio and Vercel env vars.",
 		errorPermissionDenied:
 			"Permission Denied. This feature requires a paid API key for preview models. Please click the key icon in the header to select a key.",
 		errorFailedStreetImage: "Failed to generate street image.",
@@ -221,7 +221,7 @@ export const Content = {
 		takePhoto: "Foto aufnehmen",
 		cancelCamera: "Abbrechen",
 		errorQuotaExceeded:
-			"KI-Kontingent erschöpft. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
+			"KI-Kontingent für diesen API-Schlüssel erschöpft. Kurz warten oder GEMINI_API_KEY / Abrechnung in Google AI Studio und Vercel prüfen.",
 		errorPermissionDenied:
 			"Zugriff verweigert. Diese Funktion erfordert einen kostenpflichtigen API-Schlüssel. Bitte klicken Sie auf das Schlüsselsymbol in der Kopfzeile, um einen Schlüssel auszuwählen.",
 		errorFailedStreetImage: "Straßenbild konnte nicht generiert werden.",

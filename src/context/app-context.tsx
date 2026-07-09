@@ -34,6 +34,7 @@ import {
 	type GeocodeResult,
 	type MapillaryCandidate,
 } from "../services/mapillaryService.ts";
+import { isGeminiQuotaError } from "../services/geminiService.ts";
 import type {
 	GeneratedImage,
 	LibraryEntry,
@@ -496,9 +497,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 				);
 			} catch (err: unknown) {
 				const message = err instanceof Error ? err.message : String(err);
-				const isQuotaError =
-					message.toLowerCase().includes("429") ||
-					message.toLowerCase().includes("quota");
+				const isQuotaError = isGeminiQuotaError(err);
 				const isPermissionError =
 					message.toLowerCase().includes("403") ||
 					message.toLowerCase().includes("permission denied");

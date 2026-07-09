@@ -188,7 +188,7 @@ export async function runAreaEdit(
 	const instructionText = buildAreaEditInstruction(resolvedPrompt, op);
 	const aspectRatio: GeminiAspectRatio =
 		inferGeminiAspectRatioFromImage(original);
-	const highQuality = ctx.options?.highQuality !== false;
+	const highQuality = ctx.options?.highQuality === true;
 
 	const cacheKey =
 		ctx.cache &&

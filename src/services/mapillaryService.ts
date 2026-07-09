@@ -85,7 +85,7 @@ export const geocodeBerlinWithGemini = async (
 	try {
 		const ai = getAiClient();
 		const response = await ai.models.generateContent({
-			model: "gemini-3-flash-preview",
+			model: "gemini-2.0-flash",
 			contents: `Find the precise street-level latitude and longitude for "${query}" in Berlin, Germany. 
       Also provide a clean, short display name for this location (e.g. "Müllerstraße, Wedding").
       Return ONLY a JSON object with "lat", "lng", and "displayName" keys.`,
