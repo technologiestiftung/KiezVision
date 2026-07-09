@@ -28,9 +28,9 @@ export const BERLIN_DISTRICT_GEOCODES: Record<string, BerlinDistrictGeocode> = {
 		displayName: "Schöneberg, Berlin",
 	},
 	Neukölln: {
-		lat: 52.4735,
-		lng: 13.4512,
-		displayName: "Sonnenallee, Neukölln",
+		lat: 52.4862,
+		lng: 13.426,
+		displayName: "Hermannplatz, Neukölln",
 	},
 	Pankow: { lat: 52.5979174, lng: 13.435316, displayName: "Pankow, Berlin" },
 	Charlottenburg: {
