@@ -73,11 +73,12 @@ export const Content = {
 		loading: "Loading from library...",
 		fetchingStreet: "Fetching your street...",
 		detectingLocation: "Detecting your location...",
-		locationUnavailable: "Current location is not available in this browser.",
+		locationUnavailable:
+			"Could not get your current location. Check location services, or search for a street / district instead.",
 		locationPermissionDenied:
 			"Location permission was denied. Allow location access and try again.",
 		locationNotFound:
-			"Could not identify a nearby street for your current location.",
+			"Could not get your current location. Try again, or search for a street / district instead.",
 		synthesizing: "Synthesizing...",
 		iterations: "Model Iterations",
 		maskSettings: "Mask settings",
@@ -190,11 +191,11 @@ export const Content = {
 		fetchingStreet: "Suche deine Straße...",
 		detectingLocation: "Standort wird ermittelt...",
 		locationUnavailable:
-			"Der aktuelle Standort ist in diesem Browser nicht verfügbar.",
+			"Dein aktueller Standort konnte nicht ermittelt werden. Prüfe die Standortdienste oder suche stattdessen nach Straße / Bezirk.",
 		locationPermissionDenied:
 			"Standortberechtigung wurde abgelehnt. Erlaube den Standortzugriff und versuche es erneut.",
 		locationNotFound:
-			"Es konnte keine nahegelegene Straße für deinen aktuellen Standort gefunden werden.",
+			"Dein aktueller Standort konnte nicht ermittelt werden. Versuche es erneut oder suche nach Straße / Bezirk.",
 		clearHistory: "Verlauf leeren",
 		toolkit: "Transformations-Toolkit",
 		size: "Pinselgröße",

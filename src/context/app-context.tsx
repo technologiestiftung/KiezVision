@@ -273,15 +273,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 		const prev = lastNormalizedPathRef.current;
 		lastNormalizedPathRef.current = normalizedPath;
 		if (!prev) return;
-		if (
-			prev === "/edit" &&
-			normalizedPath !== "/edit" &&
-			editor.hasUnexportedChanges
-		) {
-			editor.requestLeaveEditor(normalizedPath);
-			navigate("/edit", { replace: true });
+		if (prev === "/edit" && normalizedPath !== "/edit") {
+			// Confirmed leave already decided to discard — don't bounce back to /edit.
+			if (editor.consumeLeaveGuardBypass()) return;
+			if (editor.hasUnexportedChanges) {
+				editor.requestLeaveEditor(normalizedPath);
+				navigate("/edit", { replace: true });
+			}
 		}
 	}, [
+		editor.consumeLeaveGuardBypass,
 		editor.hasUnexportedChanges,
 		editor.requestLeaveEditor,
 		navigate,
@@ -403,17 +404,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 		searchQuery,
 	]);
 
-	const getCurrentPosition = (): Promise<GeolocationPosition> =>
+	const getCurrentPosition = (
+		options: PositionOptions,
+	): Promise<GeolocationPosition> =>
 		new Promise((resolve, reject) => {
 			if (!navigator.geolocation) {
 				reject(new Error("GEOLOCATION_UNSUPPORTED"));
 				return;
 			}
-			navigator.geolocation.getCurrentPosition(resolve, reject, {
-				enableHighAccuracy: true,
-				timeout: 10000,
-				maximumAge: 60000,
-			});
+			navigator.geolocation.getCurrentPosition(resolve, reject, options);
 		});
 
 	const handleAutoDetect = useCallback(async () => {
@@ -423,7 +422,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 			statusMessage: content.detectingLocation,
 		});
 		try {
-			const position = await getCurrentPosition();
+			let position: GeolocationPosition;
+			try {
+				position = await getCurrentPosition({
+					enableHighAccuracy: true,
+					timeout: 8000,
+					maximumAge: 120000,
+				});
+			} catch {
+				// Desktop / Wi‑Fi often fails high-accuracy GPS — fall back.
+				position = await getCurrentPosition({
+					enableHighAccuracy: false,
+					timeout: 15000,
+					maximumAge: 300000,
+				});
+			}
 			const lat = position.coords.latitude;
 			const lng = position.coords.longitude;
 			const detectedLocation = await reverseGeocodeLocation(lat, lng, language);
@@ -435,6 +448,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 					`${lat.toFixed(5)}, ${lng.toFixed(5)}`,
 			};
 			setSearchQuery(geo.displayName);
+			// Always open the imagery picker from GPS coords — a missing street
+			// name must not block Mapillary search.
 			await openImageryPicker(geo);
 		} catch (err: unknown) {
 			const geoErr = err as { message?: string; code?: number };
@@ -442,8 +457,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 				setError(content.locationUnavailable);
 			} else if (geoErr?.code === 1) {
 				setError(content.locationPermissionDenied);
+			} else if (geoErr?.code === 2 || geoErr?.code === 3) {
+				setError(content.locationUnavailable);
 			} else {
-				setError(content.locationNotFound);
+				setError(content.locationUnavailable);
 			}
 		} finally {
 			setProcessing({ isProcessing: false });
@@ -452,7 +469,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 		language,
 		openImageryPicker,
 		content.detectingLocation,
-		content.locationNotFound,
 		content.locationPermissionDenied,
 		content.locationUnavailable,
 	]);

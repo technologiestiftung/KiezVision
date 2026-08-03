@@ -150,26 +150,37 @@ export const reverseGeocodeLocation = async (
 			address.pedestrian ||
 			address.footway ||
 			address.cycleway ||
-			address.path;
-		if (!street) return null;
-
-		const streetAddress = address.house_number
-			? `${street} ${address.house_number}`
-			: street;
+			address.path ||
+			address.square ||
+			address.place ||
+			address.amenity ||
+			address.building;
 		const area =
 			address.neighbourhood ||
 			address.suburb ||
 			address.borough ||
-			address.city_district;
+			address.city_district ||
+			address.quarter;
 		const city =
 			address.city || address.town || address.village || address.state;
-		const context = area || city;
 
-		return {
-			displayName: context ? `${streetAddress}, ${context}` : streetAddress,
-			lat,
-			lng,
-		};
+		let displayName: string | null = null;
+		if (street) {
+			const streetAddress = address.house_number
+				? `${street} ${address.house_number}`
+				: street;
+			const context = area || city;
+			displayName = context ? `${streetAddress}, ${context}` : streetAddress;
+		} else if (area && city) {
+			displayName = `${area}, ${city}`;
+		} else if (area || city) {
+			displayName = area || city;
+		} else if (typeof data.display_name === "string" && data.display_name) {
+			displayName = data.display_name.split(",").slice(0, 3).join(",").trim();
+		}
+
+		if (!displayName) return null;
+		return { displayName, lat, lng };
 	} catch (error) {
 		console.error("Reverse geocoding failed:", error);
 		return null;

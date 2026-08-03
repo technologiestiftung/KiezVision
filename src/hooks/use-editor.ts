@@ -149,6 +149,8 @@ export function useEditor({
 
 	const canvasRef = useRef<InpaintCanvasHandle | null>(null);
 	const leaveDialogRef = useRef<HTMLDivElement>(null);
+	/** Lets a confirmed leave pass the /edit route guard once. */
+	const skipLeaveGuardRef = useRef(false);
 
 	const loadImageIntoEditor = useCallback(
 		(dataUrl: string, prompt: string) => {
@@ -192,12 +194,34 @@ export function useEditor({
 		[hasUnexportedChanges, navigate],
 	);
 
+	const clearEditorSession = useCallback(() => {
+		setOriginalImage(null);
+		setCurrentImage(null);
+		setHistory([]);
+		setLastExportedImage(null);
+		setMaskBase64(null);
+		setEditMode("comparison");
+		setImageSource(null);
+		setFetchedLocation(null);
+		setMapillaryMetadata(null);
+		setIsAreaEditEraser(false);
+		setInpaintMountKey((k) => k + 1);
+	}, []);
+
+	const consumeLeaveGuardBypass = useCallback(() => {
+		if (!skipLeaveGuardRef.current) return false;
+		skipLeaveGuardRef.current = false;
+		return true;
+	}, []);
+
 	const confirmLeaveEditor = useCallback(() => {
 		const next = pendingPathAfterLeaveConfirm || "/";
+		skipLeaveGuardRef.current = true;
 		setShowLeaveEditorConfirm(false);
 		setPendingPathAfterLeaveConfirm(null);
+		clearEditorSession();
 		navigate(next);
-	}, [navigate, pendingPathAfterLeaveConfirm]);
+	}, [clearEditorSession, navigate, pendingPathAfterLeaveConfirm]);
 
 	const cancelLeaveEditor = useCallback(() => {
 		setShowLeaveEditorConfirm(false);
@@ -451,6 +475,7 @@ export function useEditor({
 		requestLeaveEditor,
 		confirmLeaveEditor,
 		cancelLeaveEditor,
+		consumeLeaveGuardBypass,
 		markImageExported,
 		handleTransform,
 		handleOverlayChange,
