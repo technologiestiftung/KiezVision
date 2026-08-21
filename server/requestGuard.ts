@@ -1,9 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import {
-	resolveGeminiApiKey,
-	resolveMapillaryAccessToken,
-} from "./secrets.ts";
+import { resolveGeminiApiKey, resolveMapillaryAccessToken } from "./secrets.ts";
+import { nodeHeader } from "./httpHelpers.ts";
 
 const SESSION_COOKIE = "kv_api_session";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -15,15 +13,6 @@ const ALLOWED_GEMINI_MODELS = new Set([
 	"gemini-3.1-flash-image-preview",
 ]);
 
-function headerValue(
-	headers: IncomingMessage["headers"],
-	name: string,
-): string {
-	const raw = headers[name.toLowerCase()];
-	if (Array.isArray(raw)) return raw[0] ?? "";
-	return raw ?? "";
-}
-
 function getSessionSecret(): string {
 	const material = [
 		resolveGeminiApiKey(),
@@ -33,7 +22,7 @@ function getSessionSecret(): string {
 	return createHash("sha256").update(material).digest("hex");
 }
 
-export function getAllowedOrigins(): string[] {
+export function getAllowedOrigins(req?: IncomingMessage): string[] {
 	const origins = new Set<string>();
 	origins.add("http://localhost:3000");
 	origins.add("http://127.0.0.1:3000");
@@ -54,6 +43,16 @@ export function getAllowedOrigins(): string[] {
 		const trimmed = part.trim().replace(/\/$/, "");
 		if (trimmed) origins.add(trimmed);
 	}
+
+	// Always allow the Host this function is serving (preview + prod URLs).
+	if (req) {
+		const host = nodeHeader(req, "host").replace(/\/$/, "");
+		if (host) {
+			origins.add(`https://${host}`);
+			origins.add(`http://${host}`);
+		}
+	}
+
 	return [...origins];
 }
 
@@ -67,15 +66,15 @@ function originFromUrl(raw: string): string | null {
 }
 
 export function assertAllowedOrigin(req: IncomingMessage): void {
-	const allowed = getAllowedOrigins();
-	const origin = headerValue(req.headers, "origin");
+	const allowed = getAllowedOrigins(req);
+	const origin = nodeHeader(req, "origin");
 	if (origin && allowed.includes(origin.replace(/\/$/, ""))) return;
 
-	const referer = headerValue(req.headers, "referer");
+	const referer = nodeHeader(req, "referer");
 	const refererOrigin = referer ? originFromUrl(referer) : null;
 	if (refererOrigin && allowed.includes(refererOrigin)) return;
 
-	const fetchSite = headerValue(req.headers, "sec-fetch-site");
+	const fetchSite = nodeHeader(req, "sec-fetch-site");
 	if (fetchSite === "same-origin" && refererOrigin) {
 		if (allowed.includes(refererOrigin)) return;
 	}
@@ -119,10 +118,8 @@ export function verifySessionToken(token: string | undefined): boolean {
 	}
 }
 
-export function parseCookies(
-	req: IncomingMessage,
-): Record<string, string> {
-	const raw = headerValue(req.headers, "cookie");
+export function parseCookies(req: IncomingMessage): Record<string, string> {
+	const raw = nodeHeader(req, "cookie");
 	const out: Record<string, string> = {};
 	for (const part of raw.split(";")) {
 		const idx = part.indexOf("=");
@@ -134,10 +131,6 @@ export function parseCookies(
 	return out;
 }
 
-export function getSessionCookieName(): string {
-	return SESSION_COOKIE;
-}
-
 export function buildSessionCookie(token: string): string {
 	const secure =
 		process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
@@ -145,7 +138,7 @@ export function buildSessionCookie(token: string): string {
 		`${SESSION_COOKIE}=${encodeURIComponent(token)}`,
 		"Path=/",
 		"HttpOnly",
-		"SameSite=Strict",
+		"SameSite=Lax",
 		`Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
 	];
 	if (secure) parts.push("Secure");

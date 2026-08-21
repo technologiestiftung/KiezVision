@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { sendError, sendJson } from "../../server/httpHelpers.ts";
 import { fetchMapillaryImageBytes } from "../../server/mapillary.ts";
 import { assertProtectedApiRequest } from "../../server/requestGuard.ts";
 
@@ -7,29 +8,25 @@ export const config = {
 };
 
 export default async function handler(
-	req: IncomingMessage & { method?: string; url?: string },
-	res: ServerResponse & {
-		status: (code: number) => typeof res;
-		json: (body: unknown) => void;
-		send: (body: Buffer) => void;
-	},
+	req: IncomingMessage,
+	res: ServerResponse,
 ): Promise<void> {
-	if (req.method === "OPTIONS") {
-		res.statusCode = 204;
-		res.end();
-		return;
-	}
-	if (req.method !== "GET") {
-		res.status(405).json({ message: "Method not allowed" });
-		return;
-	}
-
 	try {
+		if (req.method === "OPTIONS") {
+			res.statusCode = 204;
+			res.end();
+			return;
+		}
+		if (req.method !== "GET") {
+			sendJson(res, 405, { message: "Method not allowed" });
+			return;
+		}
+
 		assertProtectedApiRequest(req);
 		const url = new URL(req.url ?? "/", "http://localhost");
 		const imageUrl = url.searchParams.get("url");
 		if (!imageUrl) {
-			res.status(400).json({ message: "Missing url parameter" });
+			sendJson(res, 400, { message: "Missing url parameter" });
 			return;
 		}
 		const { body, contentType } = await fetchMapillaryImageBytes(imageUrl);
@@ -39,15 +36,6 @@ export default async function handler(
 		res.end(Buffer.from(body));
 	} catch (error) {
 		console.error("[api/mapillary/image]", error);
-		const status =
-			typeof error === "object" &&
-			error !== null &&
-			"status" in error &&
-			typeof (error as { status: unknown }).status === "number"
-				? (error as { status: number }).status
-				: 500;
-		const message =
-			error instanceof Error ? error.message : "Internal server error";
-		res.status(status).json({ error: message, message });
+		sendError(res, error);
 	}
 }

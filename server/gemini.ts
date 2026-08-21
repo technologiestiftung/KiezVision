@@ -9,12 +9,7 @@ export type GeminiGenerateBody = {
 };
 
 function uint8ToBase64(value: Uint8Array): string {
-	let binary = "";
-	const chunk = 8192;
-	for (let i = 0; i < value.length; i += chunk) {
-		binary += String.fromCharCode(...value.subarray(i, i + chunk));
-	}
-	return btoa(binary);
+	return Buffer.from(value).toString("base64");
 }
 
 function serializeGeminiResponse(response: {
@@ -84,8 +79,4 @@ export async function generateContentViaServer(
 	});
 
 	return serializeGeminiResponse(response as never);
-}
-
-export function geminiConfigured(): boolean {
-	return Boolean(resolveGeminiApiKey());
 }

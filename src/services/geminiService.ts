@@ -15,7 +15,11 @@ import {
 	extractMaskBoundingBox,
 } from "./maskCropInpaint";
 import { proxyGeminiGenerateContent } from "../lib/api.ts";
-import { loadImageElement, resizeDataUrlToDimensions, compressImageForApiProxy } from "./imageUtils";
+import {
+	loadImageElement,
+	resizeDataUrlToDimensions,
+	compressImageForApiProxy,
+} from "./imageUtils";
 
 const TEXT_MODEL = "gemini-2.0-flash";
 const IMAGE_MODEL = "gemini-2.5-flash-image";
@@ -419,9 +423,7 @@ CRITICAL: The visible edit MUST appear inside every white pixel of image 2 — n
 
 /** Image models that support generateContent + IMAGE modality (v1beta). */
 function maskAreaModels(highQuality: boolean): string[] {
-	return highQuality
-		? [IMAGE_MODEL, IMAGE_MODEL_HQ]
-		: [IMAGE_MODEL];
+	return highQuality ? [IMAGE_MODEL, IMAGE_MODEL_HQ] : [IMAGE_MODEL];
 }
 
 async function generateMaskedFrame(options: {

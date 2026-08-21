@@ -1,16 +1,8 @@
 import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadEnv } from "vite";
-import {
-	generateContentViaServer,
-	geminiConfigured,
-	type GeminiGenerateBody,
-} from "./gemini.ts";
-import {
-	fetchMapillaryImageBytes,
-	fetchMapillaryImages,
-	mapillaryConfigured,
-} from "./mapillary.ts";
+import { generateContentViaServer, type GeminiGenerateBody } from "./gemini.ts";
+import { fetchMapillaryImageBytes, fetchMapillaryImages } from "./mapillary.ts";
 import {
 	assertAllowedOrigin,
 	assertBodySize,
@@ -21,6 +13,7 @@ import {
 	isSitePasswordRequired,
 	verifySitePassword,
 } from "./requestGuard.ts";
+import { geminiConfigured, mapillaryConfigured } from "./secrets.ts";
 
 type ConnectReq = IncomingMessage & { url?: string; method?: string };
 type ConnectRes = ServerResponse;
@@ -148,7 +141,10 @@ export function apiDevPlugin(mode: string): Plugin {
 							await handleStatus(res);
 							return;
 						}
-						if (pathOnly === "/api/session" && (method === "POST" || method === "GET")) {
+						if (
+							pathOnly === "/api/session" &&
+							(method === "POST" || method === "GET")
+						) {
 							await handleSession(req, res);
 							return;
 						}

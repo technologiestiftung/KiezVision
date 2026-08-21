@@ -88,8 +88,7 @@ export async function compressImageForApiProxy(
 	const img = await loadImageElement(dataUrl);
 	const w = img.naturalWidth;
 	const h = img.naturalHeight;
-	const scale =
-		w && h ? Math.min(1, maxDim / Math.max(w, h)) : 1;
+	const scale = w && h ? Math.min(1, maxDim / Math.max(w, h)) : 1;
 	const nw = Math.max(1, Math.round((w || 1) * scale));
 	const nh = Math.max(1, Math.round((h || 1) * scale));
 	const canvas = document.createElement("canvas");

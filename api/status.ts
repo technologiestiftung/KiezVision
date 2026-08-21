@@ -1,27 +1,27 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { geminiConfigured } from "../server/gemini.ts";
-import { mapillaryConfigured } from "../server/mapillary.ts";
+import { sendError, sendJson } from "../server/httpHelpers.ts";
+import { geminiConfigured, mapillaryConfigured } from "../server/secrets.ts";
 
-export default async function handler(
-	req: IncomingMessage & { method?: string },
-	res: ServerResponse & {
-		status: (code: number) => typeof res;
-		json: (body: unknown) => void;
-	},
-): Promise<void> {
-	if (req.method === "OPTIONS") {
-		res.statusCode = 204;
-		res.end();
-		return;
+export default function handler(
+	req: IncomingMessage,
+	res: ServerResponse,
+): void {
+	try {
+		if (req.method === "OPTIONS") {
+			res.statusCode = 204;
+			res.end();
+			return;
+		}
+		if (req.method !== "GET") {
+			sendJson(res, 405, { message: "Method not allowed" });
+			return;
+		}
+		sendJson(res, 200, {
+			gemini: geminiConfigured(),
+			mapillary: mapillaryConfigured(),
+		});
+	} catch (error) {
+		console.error("[api/status]", error);
+		sendError(res, error);
 	}
-	if (req.method !== "GET") {
-		res.status(405).json({ message: "Method not allowed" });
-		return;
-	}
-
-	res.setHeader("Cache-Control", "no-store");
-	res.status(200).json({
-		gemini: geminiConfigured(),
-		mapillary: mapillaryConfigured(),
-	});
 }

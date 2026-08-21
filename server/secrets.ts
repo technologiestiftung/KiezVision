@@ -9,3 +9,11 @@ export function resolveMapillaryAccessToken(
 ): string {
 	return (env.MAPILLARY_ACCESS_TOKEN ?? "").trim();
 }
+
+export function geminiConfigured(): boolean {
+	return Boolean(resolveGeminiApiKey());
+}
+
+export function mapillaryConfigured(): boolean {
+	return Boolean(resolveMapillaryAccessToken());
+}

@@ -3,10 +3,6 @@ import { resolveMapillaryAccessToken } from "./secrets.ts";
 const MAPILLARY_FIELDS =
 	"id,thumb_1024_url,captured_at,compass_angle,geometry,is_pano";
 
-export function mapillaryConfigured(): boolean {
-	return Boolean(resolveMapillaryAccessToken());
-}
-
 export async function fetchMapillaryImages(params: {
 	lat: number;
 	lng: number;
