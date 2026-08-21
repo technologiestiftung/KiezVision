@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Lock } from "lucide-react";
-import { sitePasswordHash } from "../../constants.ts";
-import { sha256Hex } from "../../lib/env.ts";
+import { ensureApiSession } from "../../lib/api.ts";
 import { PrimaryButton } from "../primitives/buttons/primary-button.tsx";
 
 export interface PasswordGateProps {
@@ -11,16 +10,20 @@ export interface PasswordGateProps {
 export const PasswordGate: React.FC<PasswordGateProps> = ({ onUnlock }) => {
 	const [input, setInput] = useState("");
 	const [error, setError] = useState(false);
+	const [busy, setBusy] = useState(false);
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		const inputHash = await sha256Hex(input);
-		if (inputHash === sitePasswordHash) {
+		setBusy(true);
+		try {
+			await ensureApiSession(input);
 			sessionStorage.setItem("kv_auth", "1");
 			onUnlock();
-		} else {
+		} catch {
 			setError(true);
 			setTimeout(() => setError(false), 1500);
+		} finally {
+			setBusy(false);
 		}
 	};
 
@@ -55,6 +58,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({ onUnlock }) => {
 						onChange={(e) => setInput(e.target.value)}
 						placeholder="Password"
 						autoFocus
+						disabled={busy}
 						aria-describedby="password-hint"
 						aria-invalid={error || undefined}
 						className={`w-full bg-gray-50 border-2 h-14 px-6 text-lg font-black tracking-tighter focus:bg-white transition-all placeholder:text-eb-900/30 ${
@@ -66,7 +70,11 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({ onUnlock }) => {
 							Incorrect password
 						</p>
 					)}
-					<PrimaryButton type="submit" className="w-full mt-4 h-14 text-sm">
+					<PrimaryButton
+						type="submit"
+						className="w-full mt-4 h-14 text-sm"
+						disabled={busy}
+					>
 						Unlock
 					</PrimaryButton>
 				</form>

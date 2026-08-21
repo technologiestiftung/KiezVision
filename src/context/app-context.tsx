@@ -20,7 +20,7 @@ import {
 	isBerlinDistrict,
 } from "../services/berlinDistricts.ts";
 import { getContent, type ContentStrings, type Language } from "../content.ts";
-import { getGeminiApiKey } from "../lib/env.ts";
+import { fetchApiStatus } from "../lib/api.ts";
 import { useEditor } from "../hooks/use-editor.ts";
 import { useFocusTrap } from "../hooks/use-focus-trap.ts";
 import { useLibrary } from "../hooks/use-library.ts";
@@ -254,10 +254,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
 	useEffect(() => {
 		const checkKey = async () => {
-			const envKey = getGeminiApiKey();
-			if (envKey) {
-				setHasApiKey(true);
-				return;
+			try {
+				const status = await fetchApiStatus();
+				if (status.gemini) {
+					setHasApiKey(true);
+					return;
+				}
+			} catch {
+				// Fall through to aistudio / permissive default.
 			}
 			if (window.aistudio) {
 				const selected = await window.aistudio.hasSelectedApiKey();

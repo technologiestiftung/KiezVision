@@ -30,5 +30,3 @@ import {
 
 export const isPasswordProtectionActive =
 	isSitePasswordEnabled() && getSitePasswordHash().length > 0;
-
-export const sitePasswordHash = getSitePasswordHash();
