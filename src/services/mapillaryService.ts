@@ -1,5 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { getGeminiApiKey, getMapillaryAccessToken } from "../lib/env.ts";
+import { Type } from "@google/genai";
+import {
+	proxyGeminiGenerateContent,
+	proxyMapillaryImages,
+} from "../lib/api.ts";
 import { geocodeBerlinDistrict } from "./berlinDistricts.ts";
 import { haversineDistanceM, offsetPointM } from "./geoUtils";
 
@@ -9,12 +12,6 @@ const NOMINATIM_HEADERS = {
 };
 
 const BERLIN_VIEWBOX = "13.088,52.338,13.761,52.675";
-
-const getAiClient = () => {
-	const apiKey = getGeminiApiKey();
-	if (!apiKey) throw new Error("API Key not found");
-	return new GoogleGenAI({ apiKey });
-};
 
 export interface GeocodeResult {
 	lat: number;
@@ -83,8 +80,7 @@ export const geocodeBerlinWithGemini = async (
 	query: string,
 ): Promise<GeocodeResult | null> => {
 	try {
-		const ai = getAiClient();
-		const response = await ai.models.generateContent({
+		const response = await proxyGeminiGenerateContent({
 			model: "gemini-2.0-flash",
 			contents: `Find the precise street-level latitude and longitude for "${query}" in Berlin, Germany. 
       Also provide a clean, short display name for this location (e.g. "Müllerstraße, Wedding").
@@ -236,19 +232,7 @@ function mapApiImageToCandidate(
 	};
 }
 
-const MAPILLARY_FETCH_TIMEOUT_MS = 20_000;
 const MAPILLARY_MAX_RADIUS_M = 50;
-const MAPILLARY_FIELDS =
-	"id,thumb_1024_url,captured_at,compass_angle,geometry,is_pano";
-
-function buildMapillaryRadiusUrl(
-	token: string,
-	lat: number,
-	lng: number,
-	limit: number,
-): string {
-	return `https://graph.mapillary.com/images?access_token=${token}&fields=${MAPILLARY_FIELDS}&lat=${lat}&lng=${lng}&radius=${MAPILLARY_MAX_RADIUS_M}&is_pano=false&limit=${Math.min(limit, 100)}`;
-}
 
 function imagerySearchPoints(
 	lat: number,
@@ -278,29 +262,23 @@ function imagerySearchPoints(
 	return points;
 }
 
-async function fetchMapillaryJson(
-	url: string,
+async function fetchMapillaryJsonAtPoint(
+	lat: number,
+	lng: number,
+	limit: number,
 ): Promise<Record<string, unknown>> {
-	const controller = new AbortController();
-	const timeout = setTimeout(
-		() => controller.abort(),
-		MAPILLARY_FETCH_TIMEOUT_MS,
-	);
 	try {
-		const response = await fetch(url, { signal: controller.signal });
-		const data = (await response.json()) as Record<string, unknown>;
-		if (!response.ok) {
-			const err = data.error as { message?: string } | undefined;
-			throw new Error(err?.message ?? `Mapillary HTTP ${response.status}`);
-		}
-		return data;
+		return await proxyMapillaryImages({
+			lat,
+			lng,
+			radius: MAPILLARY_MAX_RADIUS_M,
+			limit: Math.min(limit, 100),
+		});
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "AbortError") {
 			throw new Error("Mapillary request timed out");
 		}
 		throw error;
-	} finally {
-		clearTimeout(timeout);
 	}
 }
 
@@ -312,11 +290,6 @@ export async function fetchMapillaryCandidates(
 		limit?: number;
 	},
 ): Promise<MapillaryCandidate[]> {
-	const mapillaryToken = getMapillaryAccessToken();
-	if (!mapillaryToken) {
-		throw new Error("MAPILLARY_ACCESS_TOKEN missing");
-	}
-
 	const limit = options?.limit ?? 12;
 	const searchRadiusM = options?.searchRadiusM ?? 120;
 	const searchPoints = imagerySearchPoints(targetLat, targetLng, searchRadiusM);
@@ -328,13 +301,7 @@ export async function fetchMapillaryCandidates(
 		lat: number;
 		lng: number;
 	}): Promise<MapillaryCandidate[]> => {
-		const searchUrl = buildMapillaryRadiusUrl(
-			mapillaryToken,
-			point.lat,
-			point.lng,
-			limit,
-		);
-		const data = await fetchMapillaryJson(searchUrl);
+		const data = await fetchMapillaryJsonAtPoint(point.lat, point.lng, limit);
 		const apiError = data.error as { message?: string } | undefined;
 		if (apiError?.message) {
 			throw new Error(apiError.message);

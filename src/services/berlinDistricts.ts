@@ -82,12 +82,13 @@ export const BERLIN_DISTRICT_GEOCODES: Record<string, BerlinDistrictGeocode> = {
 	},
 };
 
-const DISTRICT_ALIASES: Record<string, keyof typeof BERLIN_DISTRICT_GEOCODES> = {
-	Neukolln: "Neukölln",
-	Kopenick: "Köpenick",
-	Koepenick: "Köpenick",
-	Schoeneberg: "Schöneberg",
-};
+const DISTRICT_ALIASES: Record<string, keyof typeof BERLIN_DISTRICT_GEOCODES> =
+	{
+		Neukolln: "Neukölln",
+		Kopenick: "Köpenick",
+		Koepenick: "Köpenick",
+		Schoeneberg: "Schöneberg",
+	};
 
 function resolveDistrictKey(query: string): string {
 	const trimmed = query.trim();

@@ -41,14 +41,16 @@ Open **http://localhost:3000/** in a Chromium-based browser (Chrome, Edge, Brave
 
 Create `.env.local` from [`.env.example`](.env.example):
 
-| Variable                                    | Required    | Description                                                       |
-| ------------------------------------------- | ----------- | ----------------------------------------------------------------- |
-| `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes         | Google Gemini API key for image generation and location grounding |
-| `MAPILLARY_ACCESS_TOKEN`                    | Recommended | Mapillary Graph API token for real street imagery                 |
+| Variable                 | Required    | Description                                                       |
+| ------------------------ | ----------- | ----------------------------------------------------------------- |
+| `GEMINI_API_KEY`         | Yes         | Google Gemini API key for image generation and location grounding |
+| `MAPILLARY_ACCESS_TOKEN` | Recommended | Mapillary Graph API token for real street imagery                 |
 
 If `MAPILLARY_ACCESS_TOKEN` is missing, street search cannot load Mapillary candidates and the app will surface an empty picker or error depending on context.
 
-Keys are injected at build time through Vite `define` in [`vite.config.ts`](vite.config.ts). They are embedded in the client bundle — use restricted API keys and do not commit `.env.local`.
+**Important:** Keys stay on the server. The browser calls `/api/gemini` and `/api/mapillary/*` (Vercel serverless in production; Vite middleware in local `npm run dev`). Do not prefix secrets with `VITE_` and do not commit `.env` / `.env.local`. On Vercel, set the same variables in Project → Settings → Environment Variables.
+
+Protected API routes require a same-origin session cookie from `POST /api/session` (plus optional site password). Set `ALLOWED_ORIGINS` if you use a custom domain beyond the default Vercel URL.
 
 ## Documentation
 

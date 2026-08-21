@@ -40,14 +40,14 @@ Open **http://localhost:3000/** in a Chromium-based browser (Chrome, Edge, Brave
 
 Create `.env.local` from [`.env.example`](.env.example):
 
-| Variable                                    | Required    | Description                                                       |
-| ------------------------------------------- | ----------- | ----------------------------------------------------------------- |
-| `GEMINI_API_KEY` or `CUSTOM_GEMINI_API_KEY` | Yes         | Google Gemini API key for image generation and location grounding |
-| `MAPILLARY_ACCESS_TOKEN`                    | Recommended | Mapillary Graph API token for real street imagery                 |
+| Variable                 | Required    | Description                                                       |
+| ------------------------ | ----------- | ----------------------------------------------------------------- |
+| `GEMINI_API_KEY`         | Yes         | Google Gemini API key for image generation and location grounding |
+| `MAPILLARY_ACCESS_TOKEN` | Recommended | Mapillary Graph API token for real street imagery                 |
 
 If `MAPILLARY_ACCESS_TOKEN` is missing, street search cannot load Mapillary candidates and the app will surface an empty picker or error depending on context.
 
-Keys are injected at build time through Vite `define` in [`vite.config.ts`](vite.config.ts). They are embedded in the client bundle — use restricted API keys and do not commit `.env.local`.
+**Important:** Keys stay on the server (`api/` on Vercel, Vite middleware locally). Do not use a `VITE_` prefix for secrets and do not commit `.env` / `.env.local`.
 
 ---
 
@@ -103,7 +103,7 @@ Presets are disabled in area edit until a mask is painted, preventing accidental
 
 ## How the technology works
 
-KiezVision runs entirely in the browser. There is no custom backend server; external APIs are called directly from the client using keys injected at build time via Vite environment variables.
+KiezVision is a React SPA with thin serverless API routes. Gemini and Mapillary secrets live only in server environment variables; the browser never receives them.
 
 ### Architecture overview
 
@@ -118,9 +118,10 @@ KiezVision runs entirely in the browser. There is no custom backend server; exte
 └──────┬───────┴──────────┬───────────┴─────────────┬─────────────┘
        │                  │                         │
        ▼                  ▼                         ▼
-  localStorage      Canvas 2D /              Google Gemini API
-  IndexedDB         File System Access       Mapillary Graph API
-                    (library folder)         OpenStreetMap Nominatim
+  localStorage      Canvas 2D /              /api/* (server)
+  IndexedDB         File System Access       ├─ Gemini (key server-side)
+                    (library folder)         ├─ Mapillary Graph + image proxy
+                                             └─ OpenStreetMap Nominatim (direct)
 ```
 
 ### Tech stack
@@ -131,8 +132,9 @@ KiezVision runs entirely in the browser. There is no custom backend server; exte
 | Routing           | React Router 7                                                                                      |
 | Motion            | Motion (Framer Motion successor)                                                                    |
 | Build             | Vite 6                                                                                              |
-| Image AI          | `@google/genai` — Gemini image models with `responseModalities: [IMAGE]`                            |
-| Street imagery    | Mapillary Graph API                                                                                 |
+| API               | Vercel serverless (`api/`) + Vite `apiDevPlugin` in local development                               |
+| Image AI          | `@google/genai` on the server — Gemini image models with `responseModalities: [IMAGE]`              |
+| Street imagery    | Mapillary Graph API (proxied)                                                                       |
 | Geocoding         | OpenStreetMap Nominatim (Berlin-bounded forward geocode)                                            |
 | Local persistence | `localStorage` (library metadata), IndexedDB (folder handle), File System Access API (on-disk PNGs) |
 
@@ -141,8 +143,8 @@ KiezVision runs entirely in the browser. There is no custom backend server; exte
 **Mapillary path**
 
 1. `geocodeBerlin()` resolves a search string to `{ lat, lng, displayName }` via Nominatim with a Berlin viewbox.
-2. `fetchMapillaryCandidates()` queries the Mapillary Graph API for images within a configurable radius (default 120 m), sorted by haversine distance.
-3. The user selects a thumbnail in `ImagerySelectionModal`. The full-resolution image URL is fetched and converted to a displayable data URL (`toDisplayableDataUrl`) to avoid CORS issues during canvas operations.
+2. `fetchMapillaryCandidates()` calls `/api/mapillary/images`, which queries the Mapillary Graph API with the server token for images within a configurable radius (default 120 m), sorted by haversine distance.
+3. The user selects a thumbnail in `ImagerySelectionModal`. The image is loaded via `/api/mapillary/image` into a displayable data URL (`toDisplayableDataUrl`) so the token never reaches the browser.
 4. The image is loaded into the editor as the original reference.
 
 **Upload path**
@@ -161,7 +163,7 @@ KiezVision runs entirely in the browser. There is no custom backend server; exte
 
 `geminiService.ts` handles API communication:
 
-- Resolves API keys from `API_KEY`, `CUSTOM_GEMINI_API_KEY`, or `GEMINI_API_KEY`.
+- Calls `/api/gemini` (server holds `GEMINI_API_KEY`).
 - Retries on HTTP 429 / quota errors with exponential backoff.
 - Sends multimodal requests (text + inline image bytes) with correct MIME types (JPEG vs PNG).
 - Parses inline image parts from the Gemini response.
@@ -226,12 +228,15 @@ Aligned with [BärGPT](https://github.com/technologiestiftung/baergpt) frontend 
 
 ```
 KiezVision/
+├── api/                         # Vercel serverless (Gemini + Mapillary proxies)
+├── server/                      # Shared server handlers + Vite dev middleware
 ├── src/
 │   ├── index.tsx                # React entry point
 │   ├── App.tsx                  # Auth gate + AppProvider wrapper
 │   ├── content.ts               # EN/DE UI strings
 │   ├── constants.ts
 │   ├── types.ts
+│   ├── lib/                     # Client API helpers (no secrets)
 │   ├── context/
 │   │   └── app-context.tsx      # Shared state (editor, library, imagery, camera)
 │   ├── layouts/

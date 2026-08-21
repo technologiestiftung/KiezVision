@@ -1,5 +1,4 @@
 import {
-	GoogleGenAI,
 	Modality,
 	type GenerateContentResponse,
 	type Part,
@@ -15,8 +14,12 @@ import {
 	embedCropInFullFrame,
 	extractMaskBoundingBox,
 } from "./maskCropInpaint";
-import { getGeminiApiKey } from "../lib/env.ts";
-import { loadImageElement, resizeDataUrlToDimensions } from "./imageUtils";
+import { proxyGeminiGenerateContent } from "../lib/api.ts";
+import {
+	loadImageElement,
+	resizeDataUrlToDimensions,
+	compressImageForApiProxy,
+} from "./imageUtils";
 
 const TEXT_MODEL = "gemini-2.0-flash";
 const IMAGE_MODEL = "gemini-2.5-flash-image";
@@ -63,16 +66,6 @@ const WHOLE_SCENE_COHERENCE_MASK =
 /** The mask is only where-to-edit metadata, not content to render. */
 const MASK_IS_LOCATION_ONLY =
 	"The mask image is not a layer, sticker, or tint to reproduce: it only marks 2D locations where changes belong. Do not paint the mask pattern, brush strokes, halos, or any overlay into the result — output a normal flat photograph as if the mask never existed.";
-
-const getAiClient = () => {
-	const apiKey = getGeminiApiKey();
-	if (!apiKey) {
-		throw new Error(
-			"Gemini API Key not found. Please ensure an API key is provided.",
-		);
-	}
-	return new GoogleGenAI({ apiKey });
-};
 
 /**
  * Helper to call Gemini with exponential backoff for 429 errors
@@ -156,7 +149,8 @@ const mimeAndBase64FromDataUrl = (
 };
 
 /** Inpainting: keep API inputs moderate — large photos + preview models often fail (IMAGE_OTHER). */
-const MAX_MASK_INPUT_DIMENSION_FOR_API = 1280;
+const MAX_MASK_INPUT_DIMENSION_FOR_API = 1024;
+const API_JPEG_QUALITY = 0.82;
 
 /** Downscale reference + mask together so registration is preserved. */
 async function scaleRefAndMaskForImageModel(
@@ -173,8 +167,6 @@ async function scaleRefAndMaskForImageModel(
 		const h = refImg.naturalHeight;
 		if (!w || !h) return { ref: refDataUrl, mask: maskDataUrl ?? null };
 		const scale = Math.min(1, maxDim / Math.max(w, h));
-		if (scale >= 1) return { ref: refDataUrl, mask: maskDataUrl ?? null };
-
 		const nw = Math.max(1, Math.round(w * scale));
 		const nh = Math.max(1, Math.round(h * scale));
 		const canvas = document.createElement("canvas");
@@ -185,7 +177,7 @@ async function scaleRefAndMaskForImageModel(
 		ctx.imageSmoothingEnabled = true;
 		ctx.imageSmoothingQuality = "high";
 		ctx.drawImage(refImg, 0, 0, nw, nh);
-		const scaledRef = canvas.toDataURL("image/png");
+		const scaledRef = canvas.toDataURL("image/jpeg", API_JPEG_QUALITY);
 
 		let scaledMask: string | null = maskDataUrl ?? null;
 		if (scaledMask) {
@@ -325,8 +317,7 @@ export const getGroundedPrompt = async (
 	if (!highQuality) return prompt;
 
 	return callWithRetry(async () => {
-		const ai = getAiClient();
-		const response = await ai.models.generateContent({
+		const response = await proxyGeminiGenerateContent({
 			model: TEXT_MODEL,
 			contents: {
 				parts: [
@@ -365,7 +356,6 @@ export const generateImage = async (
 	const detailedPrompt = await getGroundedPrompt(prompt, highQuality);
 
 	return callWithRetry(async () => {
-		const ai = getAiClient();
 		const model = highQuality ? IMAGE_MODEL_HQ : IMAGE_MODEL;
 
 		const config: Record<string, unknown> = {
@@ -389,10 +379,10 @@ export const generateImage = async (
 			];
 		}
 
-		const response = await ai.models.generateContent({
+		const response = await proxyGeminiGenerateContent({
 			model,
 			contents: `${detailedPrompt}. Style: Google Street View, wide-angle lens, 2.5m camera height, realistic urban lighting, clear daylight. ${NO_BLURRY_ARTIFACTS_HINT} CRITICAL: Do NOT add any text, labels, watermarks, or signatures to the image.`,
-			config: config as never,
+			config,
 		});
 
 		return extractInlineImageDataUrl(response);
@@ -433,13 +423,10 @@ CRITICAL: The visible edit MUST appear inside every white pixel of image 2 — n
 
 /** Image models that support generateContent + IMAGE modality (v1beta). */
 function maskAreaModels(highQuality: boolean): string[] {
-	return highQuality
-		? [IMAGE_MODEL, IMAGE_MODEL_HQ]
-		: [IMAGE_MODEL];
+	return highQuality ? [IMAGE_MODEL, IMAGE_MODEL_HQ] : [IMAGE_MODEL];
 }
 
 async function generateMaskedFrame(options: {
-	ai: GoogleGenAI;
 	imageBase64: string;
 	maskBase64: string;
 	instruction: string;
@@ -448,7 +435,6 @@ async function generateMaskedFrame(options: {
 	highQuality?: boolean;
 }): Promise<string> {
 	const {
-		ai,
 		imageBase64,
 		maskBase64,
 		instruction,
@@ -492,7 +478,7 @@ async function generateMaskedFrame(options: {
 		for (const temp of temperatures) {
 			attempt++;
 			try {
-				const response = await ai.models.generateContent({
+				const response = await proxyGeminiGenerateContent({
 					model,
 					contents: [{ role: "user", parts }],
 					config: {
@@ -536,7 +522,6 @@ async function runMaskedInpaintGeneration(
 	instruction: string,
 	highQuality = false,
 ): Promise<string> {
-	const ai = getAiClient();
 	const fullRef = await loadImageElement(imageBase64);
 	const fw = fullRef.naturalWidth;
 	const fh = fullRef.naturalHeight;
@@ -566,7 +551,6 @@ async function runMaskedInpaintGeneration(
 
 Tight crop around the edit zone. Keep the new content anchored to the same ground position and scale as in the reference crop — do not shift or float the subject. White mask pixels must show a sharp, visible version of the requested change (not a copy of the reference). Match reference sharpness and grain.`;
 				const cropOut = await generateMaskedFrame({
-					ai,
 					imageBase64: cropRef,
 					maskBase64: cropMask,
 					instruction: cropInstruction,
@@ -581,7 +565,6 @@ Tight crop around the edit zone. Keep the new content anchored to the same groun
 			}
 
 			const fullOut = await generateMaskedFrame({
-				ai,
 				imageBase64,
 				maskBase64,
 				instruction,
@@ -651,10 +634,10 @@ export async function transformImage(
 		);
 	}
 
-	const imagePrepared = await ensureBase64(imageBase64);
-
-	const refMeta = mimeAndBase64FromDataUrl(imageBase64);
-	const refMime = refMeta?.mimeType ?? imagePrepared.mimeType;
+	const imagePrepared = await compressImageForApiProxy(imageBase64, {
+		maxDim: MAX_MASK_INPUT_DIMENSION_FOR_API,
+		quality: API_JPEG_QUALITY,
+	});
 
 	const placementHint = presetAllowsNewObjects(userPrompt)
 		? "Ground any new elements on the correct surface (paving, asphalt, plaza) with believable size and perspective relative to doors, windows, curbs, and vehicles. Bicycle racks belong on the sidewalk edge beside the curb; benches stay set back from the curb; never overlap racks and benches."
@@ -663,7 +646,7 @@ export async function transformImage(
 	const parts: Part[] = [
 		{
 			inlineData: {
-				mimeType: refMime,
+				mimeType: imagePrepared.mimeType,
 				data: imagePrepared.base64,
 			},
 		},
@@ -678,8 +661,6 @@ export async function transformImage(
 	];
 
 	return callWithRetry(async () => {
-		const ai = getAiClient();
-
 		type ImageAttempt = { model: string; imageSize?: "1K" };
 		const attempts: ImageAttempt[] = highQuality
 			? [
@@ -695,7 +676,7 @@ export async function transformImage(
 			const att = attempts[i];
 			if (!att) continue;
 			try {
-				const response = await ai.models.generateContent({
+				const response = await proxyGeminiGenerateContent({
 					model: att.model,
 					contents: [{ role: "user", parts }],
 					config: {

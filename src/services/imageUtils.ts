@@ -1,4 +1,4 @@
-import { getMapillaryAccessToken } from "../lib/env.ts";
+import { mapillaryImageProxyUrl } from "../lib/api.ts";
 
 /** Normalised crop rectangle (0–1 relative to image dimensions). */
 export interface NormalizedCrop {
@@ -17,7 +17,7 @@ export async function toDisplayableDataUrl(source: string): Promise<string> {
 
 	const attempts: (() => Promise<Blob>)[] = [
 		() => fetch(source, { mode: "cors" }).then(assertOkBlob),
-		() => fetchWithMapillaryToken(source),
+		() => fetchViaMapillaryProxy(source),
 	];
 
 	let lastErr: unknown;
@@ -33,7 +33,7 @@ export async function toDisplayableDataUrl(source: string): Promise<string> {
 	const msg =
 		lastErr instanceof Error ? lastErr.message : "Could not load image";
 	throw new Error(
-		`${msg}. If this is a Mapillary photo, check MAPILLARY_ACCESS_TOKEN or upload the image instead.`,
+		`${msg}. If this is a Mapillary photo, check MAPILLARY_ACCESS_TOKEN on the server or upload the image instead.`,
 	);
 }
 
@@ -48,15 +48,14 @@ async function assertOkBlob(response: Response): Promise<Blob> {
 	return blob;
 }
 
-/** Mapillary CDN thumbs often need the app token appended for browser fetch. */
-async function fetchWithMapillaryToken(url: string): Promise<Blob> {
-	const token = getMapillaryAccessToken();
-	if (!token) throw new Error("No Mapillary token");
-	if (!/mapillary/i.test(url)) throw new Error("Not a Mapillary URL");
-
-	const sep = url.includes("?") ? "&" : "?";
-	const authed = `${url}${sep}access_token=${encodeURIComponent(token)}`;
-	return assertOkBlob(await fetch(authed, { mode: "cors" }));
+/** Authenticated Mapillary fetch via same-origin proxy. */
+async function fetchViaMapillaryProxy(url: string): Promise<Blob> {
+	if (!/mapillary|fbcdn\.net/i.test(url)) {
+		throw new Error("Not a Mapillary URL");
+	}
+	return assertOkBlob(
+		await fetch(mapillaryImageProxyUrl(url), { credentials: "same-origin" }),
+	);
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -78,6 +77,41 @@ export function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
 		img.onerror = () => reject(new Error("Failed to decode image"));
 		img.src = dataUrl;
 	});
+}
+
+export async function compressImageForApiProxy(
+	dataUrl: string,
+	options?: { maxDim?: number; quality?: number },
+): Promise<{ mimeType: string; base64: string; dataUrl: string }> {
+	const maxDim = options?.maxDim ?? 1024;
+	const quality = options?.quality ?? 0.82;
+	const img = await loadImageElement(dataUrl);
+	const w = img.naturalWidth;
+	const h = img.naturalHeight;
+	const scale = w && h ? Math.min(1, maxDim / Math.max(w, h)) : 1;
+	const nw = Math.max(1, Math.round((w || 1) * scale));
+	const nh = Math.max(1, Math.round((h || 1) * scale));
+	const canvas = document.createElement("canvas");
+	canvas.width = nw;
+	canvas.height = nh;
+	const ctx = canvas.getContext("2d");
+	if (!ctx) {
+		const m = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+		return {
+			mimeType: m?.[1] ?? "image/jpeg",
+			base64: m?.[2] ?? dataUrl,
+			dataUrl,
+		};
+	}
+	applyHighQualityCanvasScale(ctx);
+	ctx.drawImage(img, 0, 0, nw, nh);
+	const out = canvas.toDataURL("image/jpeg", quality);
+	const m = out.match(/^data:(image\/[^;]+);base64,(.+)$/);
+	return {
+		mimeType: m?.[1] ?? "image/jpeg",
+		base64: m?.[2] ?? "",
+		dataUrl: out,
+	};
 }
 
 function applyHighQualityCanvasScale(ctx: CanvasRenderingContext2D): void {
